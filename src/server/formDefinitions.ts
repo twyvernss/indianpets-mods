@@ -1,13 +1,8 @@
 import type { FormField, UiResponse } from '@devvit/web/shared';
 import { CONFIG } from './config.js';
 import type { AppSettings } from './settings.js';
-import {
-  ANY_FLAIR,
-  checklistItemsToText,
-  messageTemplatesToText,
-  TEMPLATE_SEPARATOR,
-} from './settings.js';
-import { DEFAULT_NOTICE_TEMPLATE, FORM_TEXT, starterTemplates } from './text.js';
+import { ANY_FLAIR, checklistItemsToText } from './settings.js';
+import { DEFAULT_NOTICE_TEMPLATE, FORM_TEXT } from './text.js';
 import type { ChecklistItem, MessageTemplate } from './types.js';
 
 /**
@@ -137,6 +132,95 @@ export function verifyFormResponse(input: {
   };
 }
 
+/** How many saved notices the editor offers. Matches CONFIG.maxMessageTemplates. */
+export const NOTICE_SLOTS = CONFIG.maxMessageTemplates;
+
+/** Field names for slot `index`, shared by the form and its submit handler. */
+export function noticeFieldNames(index: number): { title: string; body: string } {
+  return { title: `notice${index}Title`, body: `notice${index}Body` };
+}
+
+/**
+ * The verification-notice editor, on its own menu action.
+ *
+ * Previously these lived in the settings form as a single textarea holding
+ * every notice separated by `---`. That was unreadable on a phone and required
+ * learning a separator syntax to add a second message. Numbered title/message
+ * pairs need no syntax at all, and splitting them out keeps the settings form
+ * small enough for the mobile client to open promptly.
+ */
+export function noticesFormResponse(current: AppSettings): UiResponse {
+  const slots: FormField[] = [];
+
+  for (let index = 0; index < NOTICE_SLOTS; index++) {
+    const names = noticeFieldNames(index);
+    const saved = current.messageTemplates[index];
+
+    slots.push(
+      {
+        type: 'string',
+        name: names.title,
+        label: `Notice ${index + 1} - title`,
+        helpText:
+          index === 0
+            ? 'Shown in the dropdown when verifying. Leave the title blank to remove a notice.'
+            : undefined,
+        defaultValue: saved?.label ?? '',
+      },
+      {
+        type: 'paragraph',
+        name: names.body,
+        label: `Notice ${index + 1} - message`,
+        lineHeight: 6,
+        defaultValue: saved?.body ?? '',
+      },
+    );
+  }
+
+  return {
+    showForm: {
+      name: 'noticesForm',
+      form: {
+        title: 'Bot messages',
+        description:
+          'Everything the bot says, in one place. A saved notice needs both a title and a message to appear in the dropdown when verifying.',
+        acceptLabel: 'Save',
+        cancelLabel: 'Cancel',
+        fields: [
+          {
+            type: 'paragraph',
+            name: 'customNoticeText',
+            label: 'Default notice (used when no saved notice is picked)',
+            helpText:
+              'This is the exact wording being posted now. Clear the box to go back to the built-in text. Keep the "not a guarantee" and "donate at your own discretion" language.',
+            lineHeight: 8,
+            defaultValue: current.customNoticeText || DEFAULT_NOTICE_TEMPLATE,
+          },
+          ...slots,
+          {
+            type: 'paragraph',
+            name: 'automodReplyText',
+            label: 'Message when AutoModerator holds a fundraiser',
+            helpText:
+              'Only posted if that feature is switched on in settings. Blank uses the built-in text. Placeholders: {subreddit}, {op}.',
+            lineHeight: 6,
+            defaultValue: current.automodReplyText,
+          },
+          {
+            type: 'paragraph',
+            name: 'customReminderText',
+            label: 'Message asking the OP for an update on an old fundraiser',
+            helpText:
+              'Blank uses the built-in text. Placeholders: {subreddit}, {op}, {days}, {grace}.',
+            lineHeight: 6,
+            defaultValue: current.customReminderText,
+          },
+        ],
+      },
+    },
+  };
+}
+
 /**
  * The in-subreddit settings editor.
  *
@@ -184,7 +268,7 @@ export function settingsFormResponse(
       form: {
         title: 'Fundraiser tools settings',
         description:
-          'Changes take effect immediately and apply to this subreddit only. Tick "Reset everything" at the bottom to go back to the app defaults.',
+          'Changes take effect immediately and apply to this subreddit only. The wording the bot posts is edited separately, under "Edit bot messages". Tick "Reset everything" at the bottom to go back to the app defaults.',
         acceptLabel: 'Save',
         cancelLabel: 'Cancel',
         fields: [
@@ -228,31 +312,6 @@ export function settingsFormResponse(
                 defaultValue: checklistItemsToText(current.checklistItems),
               },
               {
-                type: 'paragraph',
-                name: 'messageTemplates',
-                label: 'Saved notices a moderator can pick from (shown as a dropdown when verifying)',
-                helpText: `One per block, separated by a line containing only ${TEMPLATE_SEPARATOR}. The first line of each block is its name in the dropdown, the rest is the comment. Placeholders: {subreddit}, {date}, {mod}. Maximum ${CONFIG.maxMessageTemplates}.`,
-                lineHeight: 8,
-                // Prefilled with the wording already in use when there are
-                // none yet, so the format is obvious and the first notice is
-                // real text rather than a blank page.
-                defaultValue:
-                  current.messageTemplates.length > 0
-                    ? messageTemplatesToText(current.messageTemplates)
-                    : starterTemplates(),
-              },
-              {
-                type: 'paragraph',
-                name: 'customNoticeText',
-                label: 'The notice the bot posts (used when no saved notice is picked)',
-                helpText:
-                  'This is the exact wording currently being posted. Edit it freely, or clear the box to go back to the built-in text. Placeholders: {subreddit}, {date}, {mod}. Keep the "not a guarantee" and "donate at your own discretion" language.',
-                lineHeight: 10,
-                // Shows the real wording instead of an empty box, so a
-                // moderator can see what is being posted before changing it.
-                defaultValue: current.customNoticeText || DEFAULT_NOTICE_TEMPLATE,
-              },
-              {
                 type: 'boolean',
                 name: 'showAuthorSummary',
                 label: "Show the author's history on the verify form",
@@ -273,14 +332,6 @@ export function settingsFormResponse(
                 helpText:
                   'Off by default. If AutoModerator already posts a similar comment, remove that one first - two bot comments on a post is worse than one.',
                 defaultValue: current.automodReplyEnabled,
-              },
-              {
-                type: 'paragraph',
-                name: 'automodReplyText',
-                label: 'Custom intake wording',
-                helpText: 'Blank uses the built-in text. Placeholders: {subreddit}, {op}.',
-                lineHeight: 6,
-                defaultValue: current.automodReplyText,
               },
             ],
           },
@@ -348,15 +399,6 @@ export function settingsFormResponse(
                 label: 'Also lock the post when reporting it',
                 helpText: 'Off by default.',
                 defaultValue: current.lockStalePosts,
-              },
-              {
-                type: 'paragraph',
-                name: 'customReminderText',
-                label: 'Custom reminder wording',
-                helpText:
-                  'Blank uses the built-in wording. Placeholders: {subreddit}, {op}, {days}, {grace}.',
-                lineHeight: 5,
-                defaultValue: current.customReminderText,
               },
             ],
           },

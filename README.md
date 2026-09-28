@@ -341,6 +341,26 @@ The moderator attribution line is appended to *any* wording when the setting is 
 notice does not silently disable that setting. If the text already uses `{mod}`, the line is not
 added twice.
 
+### Editing what the bot says
+
+All wording lives behind its own menu action, **"Edit bot messages"**: the default notice, five
+numbered saved notices (title + message each), the AutoModerator intake reply and the staleness
+reminder.
+
+Saved notices are stored as one `---`-separated block, the same format the raw subreddit setting
+has always used, so the editor is purely a nicer front end and hand-editing the setting still works.
+A slot needs **both** a title and a message to count - a title alone would post an empty comment, a
+message alone could not be picked from the dropdown.
+
+This is also why it is a separate menu action. Those are the only long fields in the app, and
+keeping them out of the settings form is what lets that form open promptly on mobile:
+
+| Form | Before | After |
+| --- | --- | --- |
+| Settings | 7,738 B / 28 fields | **4,518 B / 24 fields** |
+| Bot messages | - | 4,139 B / 13 fields |
+| Verify (unchanged) | 1,639 B / 3 fields | 1,639 B / 3 fields |
+
 ### Picking a notice at verify time
 
 The picker appears on the verify form as soon as the subreddit has any saved notices, and a fresh
@@ -426,7 +446,7 @@ npm run test:types
 npm run check
 ```
 
-213 tests across pure logic (sanitisation, dates, retry classification, settings resolution and
+220 tests across pure logic (sanitisation, dates, retry classification, settings resolution and
 clamping, checklist parsing, comment wording, URL normalisation, hashing) and the four services
 against in-memory fakes: idempotency, concurrent runs, expired and mismatched tokens, missing posts,
 deleted authors, v1→v2 record migration, every partial-failure path, duplicate races, link release
@@ -444,5 +464,5 @@ service layer, which is tested; the handlers are exercised during playtest.
 
 ## Test counts
 
-213 unit tests across seven files. Everything below the HTTP handlers is covered; the handlers
+220 unit tests across seven files. Everything below the HTTP handlers is covered; the handlers
 themselves are exercised during playtest.

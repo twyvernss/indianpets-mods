@@ -43,12 +43,22 @@
           "subreddit"
         ],
         "endpoint": "/internal/menu/settings"
+      },
+      {
+        "label": "Edit bot messages",
+        "description": "Edit every message the bot posts, including the saved verification notices.",
+        "forUserType": "moderator",
+        "location": [
+          "subreddit"
+        ],
+        "endpoint": "/internal/menu/notices"
       }
     ]
   },
   "forms": {
     "verifyForm": "/internal/form/verify-submit",
-    "settingsForm": "/internal/form/settings-submit"
+    "settingsForm": "/internal/form/settings-submit",
+    "noticesForm": "/internal/form/notices-submit"
   },
   "triggers": {
     "onAutomoderatorFilterPost": "/internal/triggers/automod-filter-post",

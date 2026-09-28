@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CONFIG } from '../config.js';
-import { sanitizeText, toBoolean, toNonEmptyString } from '../lib/sanitize.js';
+import {
+  sanitizeMultiline,
+  sanitizeText,
+  toBoolean,
+  toNonEmptyString,
+} from '../lib/sanitize.js';
 import { daysBetween, formatDisplayDate } from '../lib/time.js';
 import { isTransientError, withRetry } from '../lib/retry.js';
 import {
@@ -489,5 +494,48 @@ describe('sanitiseWikiPageName', () => {
   it('falls back rather than writing to the wiki root', () => {
     expect(sanitiseWikiPageName('')).toBe('fundraiser-verifications');
     expect(sanitiseWikiPageName('   ')).toBe('fundraiser-verifications');
+  });
+});
+
+describe('sanitizeMultiline', () => {
+  it('keeps paragraph breaks, which Markdown depends on', () => {
+    expect(sanitizeMultiline('line one\n\nline two', 200)).toBe('line one\n\nline two');
+  });
+
+  it('normalises Windows line endings', () => {
+    expect(sanitizeMultiline('a\r\nb', 200)).toBe('a\nb');
+  });
+
+  it('collapses runs of blank lines and trailing spaces', () => {
+    expect(sanitizeMultiline('a   \n\n\n\n\nb', 200)).toBe('a\n\nb');
+  });
+
+  it('strips invisible and BiDi characters', () => {
+    const cleaned = sanitizeMultiline('safe\u200Btext\u202Ereversed', 200);
+    expect(cleaned).not.toContain('\u200B');
+    expect(cleaned).not.toContain('\u202E');
+  });
+
+  it('rejects non-strings and bounds the length', () => {
+    expect(sanitizeMultiline(undefined, 50)).toBe('');
+    expect(sanitizeMultiline('x'.repeat(500), 50).length).toBeLessThanOrEqual(50);
+  });
+});
+
+describe('notice editor round trip', () => {
+  it('folds numbered title/message pairs back into the stored block format', () => {
+    // What the submit handler builds, and what the settings layer parses, must
+    // agree - this is the whole contract between the new editor and storage.
+    const templates = [
+      { id: 'tpl0', label: 'Documents checked', body: 'Body one.\n\nSecond paragraph.' },
+      { id: 'tpl1', label: 'Registered rescue', body: 'Body two.' },
+    ];
+
+    const stored = messageTemplatesToText(templates);
+    expect(parseMessageTemplates(stored)).toEqual(templates);
+  });
+
+  it('an empty editor falls back to the starter notices, not to nothing', () => {
+    expect(parseSettings({ messageTemplates: '' }).messageTemplates.length).toBeGreaterThan(0);
   });
 });

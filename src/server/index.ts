@@ -15,8 +15,10 @@ import { triggers } from './handlers/triggers.js';
  *   /internal/menu/verify-fundraiser          menu.items[0]
  *   /internal/menu/verification-status        menu.items[1]
  *   /internal/menu/settings                   menu.items[2]
+ *   /internal/menu/notices                    menu.items[3]
  *   /internal/form/verify-submit              forms.verifyForm
  *   /internal/form/settings-submit            forms.settingsForm
+ *   /internal/form/notices-submit             forms.noticesForm
  *   /internal/triggers/automod-filter-post    triggers.onAutomoderatorFilterPost
  *   /internal/triggers/post-submit            triggers.onPostSubmit
  *   /internal/triggers/comment-create         triggers.onCommentCreate

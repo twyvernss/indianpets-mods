@@ -4,12 +4,17 @@ import { Hono } from 'hono';
 import { CONFIG } from '../config.js';
 import { getContainer } from '../container.js';
 import { asPostId } from '../data/tokenRepo.js';
-import { CHECKLIST_FIELD } from '../formDefinitions.js';
+import { CHECKLIST_FIELD, NOTICE_SLOTS, noticeFieldNames } from '../formDefinitions.js';
 import { describeError } from '../lib/logger.js';
-import { sanitizeText, toBoolean, toNonEmptyString } from '../lib/sanitize.js';
-import { pickOverrides } from '../settings.js';
+import {
+  sanitizeMultiline,
+  sanitizeText,
+  toBoolean,
+  toNonEmptyString,
+} from '../lib/sanitize.js';
+import { messageTemplatesToText, pickOverrides } from '../settings.js';
 import { TOASTS } from '../text.js';
-import type { VerifyFormValues } from '../types.js';
+import type { MessageTemplate, VerifyFormValues } from '../types.js';
 import { toastFor, UNEXPECTED_ERROR } from './responses.js';
 
 export const forms = new Hono();
@@ -118,6 +123,69 @@ forms.post('/settings-submit', async (c) => {
     });
   } catch (error) {
     log.error('settings-submit failed', { reason: describeError(error) });
+    return c.json<UiResponse>(UNEXPECTED_ERROR);
+  }
+});
+
+/**
+ * The verification-notice editor.
+ *
+ * Numbered title/message pairs are folded back into the same block format the
+ * setting has always stored, so nothing downstream changes and a moderator who
+ * prefers to edit the raw setting still can. A slot needs BOTH a title and a
+ * message to count: a title with no body would post an empty comment, and a
+ * body with no title could not be picked from the dropdown.
+ */
+forms.post('/notices-submit', async (c) => {
+  const { log, config, gate } = getContainer();
+
+  try {
+    const username = await gate.actingUsername();
+    if (!username || !(await gate.isModerator(username))) {
+      return c.json<UiResponse>({
+        showToast: { text: TOASTS.notModerator, appearance: 'neutral' },
+      });
+    }
+
+    const body = await c.req.json<Record<string, unknown>>();
+
+    const templates: MessageTemplate[] = [];
+    for (let index = 0; index < NOTICE_SLOTS; index++) {
+      const names = noticeFieldNames(index);
+      const label = sanitizeText(body[names.title], CONFIG.templateLabelMaxLength);
+      const text = sanitizeMultiline(body[names.body], CONFIG.templateBodyMaxLength);
+      if (label.length === 0 || text.length === 0) continue;
+      templates.push({ id: `tpl${templates.length}`, label, body: text });
+    }
+
+    await config.merge({
+      customNoticeText: sanitizeMultiline(
+        body['customNoticeText'],
+        CONFIG.templateBodyMaxLength,
+      ),
+      automodReplyText: sanitizeMultiline(body['automodReplyText'], CONFIG.templateBodyMaxLength),
+      customReminderText: sanitizeMultiline(
+        body['customReminderText'],
+        CONFIG.templateBodyMaxLength,
+      ),
+      // Stored blank when every slot is empty, which the settings layer reads
+      // as "fall back to the starter notices".
+      messageTemplates: templates.length > 0 ? messageTemplatesToText(templates) : '',
+    });
+
+    log.info('verification notices updated', { mod: username, count: templates.length });
+
+    return c.json<UiResponse>({
+      showToast: {
+        text:
+          templates.length > 0
+            ? `Saved. ${templates.length} notice${templates.length === 1 ? '' : 's'} to pick from.`
+            : 'Saved. No custom notices, so the starter list is used.',
+        appearance: 'success',
+      },
+    });
+  } catch (error) {
+    log.error('notices-submit failed', { reason: describeError(error) });
     return c.json<UiResponse>(UNEXPECTED_ERROR);
   }
 });

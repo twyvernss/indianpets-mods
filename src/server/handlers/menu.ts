@@ -1,7 +1,11 @@
 import type { MenuItemRequest, UiResponse } from '@devvit/web/shared';
 import { Hono } from 'hono';
 import { getContainer } from '../container.js';
-import { settingsFormResponse, verifyFormResponse } from '../formDefinitions.js';
+import {
+  noticesFormResponse,
+  settingsFormResponse,
+  verifyFormResponse,
+} from '../formDefinitions.js';
 import { describeError } from '../lib/logger.js';
 import { formatVerifiedDate } from '../services/verification.js';
 import { alreadyVerifiedToast, heldByAutomodToast, statusToast, TOASTS } from '../text.js';
@@ -143,6 +147,31 @@ menu.post('/settings', async (c) => {
     return c.json<UiResponse>(settingsFormResponse(current, flairs));
   } catch (error) {
     log.error('settings menu action failed', { reason: describeError(error) });
+    return c.json<UiResponse>(UNEXPECTED_ERROR);
+  }
+});
+
+/**
+ * "Edit verification notices".
+ *
+ * Separate from the settings action on purpose: these are the only genuinely
+ * long fields, and keeping them out of the settings form is what lets that form
+ * open promptly on mobile.
+ */
+menu.post('/notices', async (c) => {
+  const { log, settings, gate } = getContainer();
+
+  try {
+    const username = await gate.actingUsername();
+    if (!username || !(await gate.isModerator(username))) {
+      return c.json<UiResponse>({
+        showToast: { text: TOASTS.notModerator, appearance: 'neutral' },
+      });
+    }
+
+    return c.json<UiResponse>(noticesFormResponse(await settings.get()));
+  } catch (error) {
+    log.error('notices menu action failed', { reason: describeError(error) });
     return c.json<UiResponse>(UNEXPECTED_ERROR);
   }
 });
