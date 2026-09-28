@@ -78,10 +78,27 @@ Devvit and also becomes the app account's username and the app's URL slug. It mu
 characters, lowercase letters/numbers/hyphens, starting with a letter. If the name is taken, change
 it in `devvit.json` before the first upload.
 
-> **Windows note:** if you are using a portable Node install, put it on `PATH` first.
-> In **cmd.exe**: `set "PATH=C:\path\to\node;%PATH%"`
-> In **PowerShell**: `$env:Path = 'C:\path\to\node;' + $env:Path`
-> The two are not interchangeable, and `cmd` does not accept `;` to chain commands.
+> **Windows note:** if Node is not already on your `PATH` (a portable install, for
+> example), run the matching helper from the repo root first. It locates Node and adds
+> it for the current shell only.
+>
+> PowerShell — the leading dot matters, it makes the script run *in* your shell:
+>
+> ```
+> . .\tools\use-node.ps1
+> ```
+>
+> cmd.exe — the `call` matters, for the same reason:
+>
+> ```
+> call tools\use-node.cmd
+> ```
+>
+> By hand instead: PowerShell is `$env:Path = 'C:\path\to\node;' + $env:Path`, cmd.exe
+> is `set "PATH=C:\path\to\node;%PATH%"`. These are **not** interchangeable — in
+> PowerShell, `set` is an alias for `Set-Variable`, so the cmd form silently creates a
+> junk variable and leaves `PATH` untouched. Likewise `cd /d` is cmd-only, and `;`
+> chains commands in PowerShell but not in cmd.
 
 ## Playtest on a test subreddit
 
