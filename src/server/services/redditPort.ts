@@ -82,9 +82,18 @@ export type RedditPort = {
   /** Current contents of a wiki page, or null if it does not exist yet. */
   readWikiPage(page: string): Promise<string | null>;
   /**
-   * Creates or replaces a wiki page. New pages are locked to MODS_ONLY and
-   * unlisted, because the log names the people who asked for money here.
+   * Guarantees the log page exists and is readable by moderators ONLY.
+   *
+   * Reddit's default permission level is SUBREDDIT_PERMISSIONS, which on most
+   * subreddits means world-readable. This creates the page (with `seedContent`,
+   * which must contain no usernames), applies MODS_ONLY, and then READS THE
+   * SETTING BACK to confirm it took.
+   *
+   * Returns false if privacy could not be proven. Callers must not write
+   * anything identifying to the page when it returns false.
    */
+  ensureWikiPagePrivate(page: string, seedContent: string): Promise<boolean>;
+  /** Replaces a wiki page's contents. Only safe after the check above passes. */
   writeWikiPage(page: string, content: string, reason: string): Promise<void>;
   /** Posts to Mod Discussions. Does not involve or notify any user. */
   sendModDiscussion(subject: string, bodyMarkdown: string): Promise<void>;

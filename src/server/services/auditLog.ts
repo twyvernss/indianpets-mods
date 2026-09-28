@@ -70,6 +70,10 @@ export function auditPageHeader(subredditName: string): string {
     'Written automatically by the mod team bot, one row per verified fundraiser.',
     'Moderator notes are deliberately not included here.',
     '',
+    'This page is restricted to moderators. If you can read it without being a',
+    'moderator of this community, please tell the mod team: the bot refuses to',
+    'write to it unless it can confirm the restriction, so something is wrong.',
+    '',
     '| Verified (IST) | Post | Fundraiser by | Verified by | Checklist | Notice |',
     '| --- | --- | --- | --- | --- | --- |',
   ].join('\n');
@@ -118,6 +122,43 @@ export function createAuditLogService(deps: AuditLogDeps): AuditLogService {
     }
   }
 
+  /**
+   * Appends one row, serialised behind the lock.
+   *
+   * Only ever called once the page has been confirmed moderator-only.
+   */
+  async function appendRow(
+    page: string,
+    subredditName: string,
+    record: VerificationRecord,
+    row: string,
+  ): Promise<void> {
+    const result = await withLock(async () => {
+      const existing = await reddit.readWikiPage(page);
+
+      // A page nearing Reddit's size cap is left alone; next month's page takes
+      // over. Rotating monthly makes this a safety net, not a routine event.
+      if (existing !== null && existing.length > CONFIG.audit.maxPageBytes) {
+        log.warn('audit log page is full; skipping this row', { page });
+        return;
+      }
+
+      // Guard against a redelivered job writing the same row twice.
+      if (existing !== null && existing.includes(record.postId)) {
+        log.info('audit log already contains this post', { page, postId: record.postId });
+        return;
+      }
+
+      const content =
+        existing === null ? `${auditPageHeader(subredditName)}\n${row}` : `${existing}\n${row}`;
+      await reddit.writeWikiPage(page, content, `Verified ${record.postId}`);
+    });
+
+    if (result === null) {
+      log.warn('audit log busy; another verification holds the lock', { postId: record.postId });
+    }
+  }
+
   return {
     async record(record): Promise<void> {
       const config = await settings.get();
@@ -127,33 +168,23 @@ export function createAuditLogService(deps: AuditLogDeps): AuditLogService {
       const row = auditRow(record, subredditName);
 
       if (config.wikiLogEnabled) {
-        const result = await withLock(async () => {
-          const page = auditPageName(config.wikiLogPage, record.verifiedAtMs);
-          const existing = await reddit.readWikiPage(page);
+        const page = auditPageName(config.wikiLogPage, record.verifiedAtMs);
 
-          // A page nearing Reddit's size cap is left alone; the next month's
-          // page takes over. Rotating monthly means this is a safety net
-          // rather than something that happens in practice.
-          if (existing !== null && existing.length > CONFIG.audit.maxPageBytes) {
-            log.warn('audit log page is full; skipping this row', { page });
-            return false;
-          }
+        // Reddit's default wiki permission is world-readable. The row names the
+        // verifying moderator, and this app exists precisely so moderators are
+        // not publicly attached to verifications - so nothing is written until
+        // the page is PROVEN moderator-only. This fails closed on purpose.
+        const isPrivate = await reddit.ensureWikiPagePrivate(page, auditPageHeader(subredditName));
 
-          // Guard against a redelivered job writing the same row twice.
-          if (existing !== null && existing.includes(record.postId)) {
-            log.info('audit log already contains this post', { page, postId: record.postId });
-            return true;
-          }
-
-          const content = existing === null ? `${auditPageHeader(subredditName)}\n${row}` : `${existing}\n${row}`;
-          await reddit.writeWikiPage(page, content, `Verified ${record.postId}`);
-          return true;
-        });
-
-        if (result === null) {
-          log.warn('audit log busy; another verification holds the lock', {
+        if (!isPrivate) {
+          // Skip the wiki only. Mod Discussions is a separate channel and is
+          // not affected by a wiki permission problem.
+          log.error('skipping the wiki log: page could not be confirmed moderator-only', {
+            page,
             postId: record.postId,
           });
+        } else {
+          await appendRow(page, subredditName, record, row);
         }
       }
 

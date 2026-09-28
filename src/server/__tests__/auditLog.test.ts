@@ -181,3 +181,51 @@ describe('mod discussions', () => {
     expect(h.reddit.wiki.get(PAGE)).toContain('t3_abc123');
   });
 });
+
+describe('wiki privacy', () => {
+  it('writes nothing at all when the page cannot be confirmed moderator-only', async () => {
+    // Reddit's default wiki permission is world-readable, and the row names the
+    // verifying moderator. Failing closed is the whole point.
+    const h = harness();
+    h.reddit.wikiPrivate = false;
+
+    await h.service.record(record());
+
+    expect(h.reddit.wiki.size).toBe(0);
+    expect(h.reddit.calls).not.toContain('writeWiki');
+  });
+
+  it('confirms privacy before every append, not just on creation', async () => {
+    const h = harness();
+    await h.service.record(record());
+
+    // A moderator could relax the page settings between verifications.
+    h.reddit.wikiPrivate = false;
+    await h.service.record(record({ postId: 't3_second' as T3 }));
+
+    const page = h.reddit.wiki.get(PAGE) ?? '';
+    expect(page).toContain('t3_abc123');
+    expect(page).not.toContain('t3_second');
+  });
+
+  it('seeds a new page with a header that names nobody', async () => {
+    const h = harness();
+    await h.service.record(record());
+
+    const page = h.reddit.wiki.get(PAGE) ?? '';
+    const header = page.split('| Verified (IST) |')[0] ?? '';
+    expect(header).not.toContain('u/op_user');
+    expect(header).not.toContain('u/mod_one');
+    expect(header).toContain('restricted to moderators');
+  });
+
+  it('still posts to mod discussions when the wiki is refused', async () => {
+    const h = harness({ modmailLogEnabled: true });
+    h.reddit.wikiPrivate = false;
+
+    await h.service.record(record());
+
+    expect(h.reddit.wiki.size).toBe(0);
+    expect(h.reddit.modDiscussions).toHaveLength(1);
+  });
+});

@@ -252,7 +252,13 @@ moderator never waits for it:
 | 28 Sep 2026, 16:43 IST | [t3_abc123](https://reddit.com) | u/op_user | u/mod_one | 2/3: Vet bill is in the OP name; Clinic contact was checked | Documents checked with the clinic |
 
 - Pages rotate monthly (`fundraiser-verifications/2026-09`) so none approaches Reddit's size cap.
-- New pages are created **MODS_ONLY and unlisted**.
+- **Privacy is proven, not assumed.** Reddit's default wiki permission is
+  `SUBREDDIT_PERMISSIONS`, which on most subreddits means world-readable. Before every append the
+  app creates the page if needed (seeded with a header naming nobody), applies `MODS_ONLY`, and
+  then *reads the setting back*. If it cannot confirm the page is moderator-only, **nothing is
+  written** - not on the first append and not on any later one, because a moderator could relax the
+  setting at any time. The row names the verifying moderator, and this app exists so moderators are
+  not publicly attached to verifications.
 - The wiki keeps its own revision history, so a bad write is recoverable.
 - Appends are serialised behind a short Redis lock, because it is a read-modify-write.
 - A redelivered job will not write the same post twice.
@@ -419,7 +425,7 @@ npm run test:types
 npm run check
 ```
 
-204 tests across pure logic (sanitisation, dates, retry classification, settings resolution and
+208 tests across pure logic (sanitisation, dates, retry classification, settings resolution and
 clamping, checklist parsing, comment wording, URL normalisation, hashing) and the four services
 against in-memory fakes: idempotency, concurrent runs, expired and mismatched tokens, missing posts,
 deleted authors, v1→v2 record migration, every partial-failure path, duplicate races, link release
@@ -437,5 +443,5 @@ service layer, which is tested; the handlers are exercised during playtest.
 
 ## Test counts
 
-204 unit tests across seven files. Everything below the HTTP handlers is covered; the handlers
+208 unit tests across seven files. Everything below the HTTP handlers is covered; the handlers
 themselves are exercised during playtest.

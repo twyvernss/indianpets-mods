@@ -156,33 +156,56 @@ export function createRedditAdapter(log: Logger): RedditPort {
       }
     },
 
-    async writeWikiPage(page: string, content: string, reason: string): Promise<void> {
-      const existing = await this.readWikiPage(page);
+    async ensureWikiPagePrivate(page: string, seedContent: string): Promise<boolean> {
+      try {
+        const existing = await this.readWikiPage(page);
 
-      if (existing === null) {
-        await run('createWikiPage', () =>
-          reddit.createWikiPage({ subredditName: context.subredditName, page, content, reason }),
-        );
-        // A wiki page is readable by anyone unless told otherwise, and this one
-        // names people who asked for money. Lock it down immediately.
-        try {
-          await run('updateWikiPageSettings', () =>
-            reddit.updateWikiPageSettings({
+        if (existing === null) {
+          // Seeded with content that names nobody, so the page is never
+          // world-readable WITH identifying rows in it, even for an instant.
+          await run('createWikiPage', () =>
+            reddit.createWikiPage({
               subredditName: context.subredditName,
               page,
-              listed: false,
-              permLevel: WIKI_MODS_ONLY,
+              content: seedContent,
+              reason: 'Create fundraiser verification log',
             }),
           );
-        } catch (error) {
-          log.error('audit log page created but could not be restricted to mods', {
+        }
+
+        await run('updateWikiPageSettings', () =>
+          reddit.updateWikiPageSettings({
+            subredditName: context.subredditName,
             page,
-            reason: describeError(error),
+            listed: false,
+            permLevel: WIKI_MODS_ONLY,
+          }),
+        );
+
+        // Read it back. Applying a setting is not the same as it having taken,
+        // and this decides whether moderator names get written down.
+        const settings = await run('getWikiPageSettings', () =>
+          reddit.getWikiPageSettings(context.subredditName, page),
+        );
+
+        const isPrivate = Number(settings.permLevel) === Number(WIKI_MODS_ONLY);
+        if (!isPrivate) {
+          log.error('wiki log page is NOT restricted to moderators; refusing to write to it', {
+            page,
+            permLevel: String(settings.permLevel),
           });
         }
-        return;
+        return isPrivate;
+      } catch (error) {
+        log.error('could not confirm the wiki log page is private', {
+          page,
+          reason: describeError(error),
+        });
+        return false;
       }
+    },
 
+    async writeWikiPage(page: string, content: string, reason: string): Promise<void> {
       await run('updateWikiPage', () =>
         reddit.updateWikiPage({ subredditName: context.subredditName, page, content, reason }),
       );

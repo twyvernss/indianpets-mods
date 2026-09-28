@@ -244,6 +244,16 @@ export class FakeReddit implements RedditPort {
     return this.wiki.get(page) ?? null;
   }
 
+  /** Set false to simulate a page that could not be restricted to moderators. */
+  public wikiPrivate = true;
+
+  async ensureWikiPagePrivate(page: string, seedContent: string): Promise<boolean> {
+    this.calls.push('ensureWikiPrivate');
+    if (!this.wikiPrivate) return false;
+    if (!this.wiki.has(page)) this.wiki.set(page, seedContent);
+    return true;
+  }
+
   async writeWikiPage(page: string, content: string): Promise<void> {
     this.calls.push('writeWiki');
     const failure = this.options.failOn?.wiki;
