@@ -151,15 +151,23 @@ export function buildVerificationComment(input: {
  */
 export function starterTemplates(): string {
   return [
-    'Verified with full documents',
-    DEFAULT_NOTICE_TEMPLATE,
+    'Documents checked with the clinic',
+    '## Fundraiser **Approved** by the r/{subreddit} mod team',
+    '',
+    'The moderators of r/{subreddit} have seen the treatment documents for this fundraiser and confirmed them directly with the clinic.',
+    '',
+    '**This is not a guarantee.** We cannot audit how donated money is actually spent, we are not involved in this fundraiser, and circumstances can change after a check is done. Please donate at your own discretion, and only what you can comfortably afford.',
+    '',
+    'If something about this fundraiser looks wrong, report this post or [message the moderators](https://www.reddit.com/message/compose?to=/r/{subreddit}). Please do not accuse people in the comments.',
     '---',
-    'Verified for a registered rescue',
+    'Registered rescue organisation',
     '## Fundraiser **Approved** by the r/{subreddit} mod team',
     '',
     'This fundraiser is run by a rescue organisation known to the r/{subreddit} mod team, and we have seen documentation for the animals involved.',
     '',
     '**This is not a guarantee.** We cannot audit how donated money is actually spent. Please donate at your own discretion, and only what you can comfortably afford.',
+    '',
+    'If something about this fundraiser looks wrong, report this post or [message the moderators](https://www.reddit.com/message/compose?to=/r/{subreddit}). Please do not accuse people in the comments.',
   ].join('\n');
 }
 

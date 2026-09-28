@@ -134,9 +134,28 @@ describe('withRetry', () => {
 
 describe('settings', () => {
   it('falls back to defaults for missing or wrongly typed values', () => {
-    expect(parseSettings({})).toEqual(DEFAULT_SETTINGS);
-    expect(parseSettings({ addModNote: 'yes', customNoticeText: 7 })).toEqual(DEFAULT_SETTINGS);
+    const wrongTypes = parseSettings({ addModNote: 'yes', customNoticeText: 7, reminderDays: {} });
+    expect(wrongTypes.addModNote).toBe(DEFAULT_SETTINGS.addModNote);
+    expect(wrongTypes.customNoticeText).toBe(DEFAULT_SETTINGS.customNoticeText);
+    expect(wrongTypes.reminderDays).toBe(DEFAULT_SETTINGS.reminderDays);
     expect(parseSettings({ showVerifyingModInComment: true }).showVerifyingModInComment).toBe(true);
+  });
+
+  it('supplies the starter notices when the box has never been filled in', () => {
+    // Otherwise the picker would stay hidden until somebody opened settings and
+    // pressed Save, which is exactly the trap this avoids.
+    const resolved = parseSettings({});
+    expect(resolved.messageTemplates.map((template) => template.label)).toEqual([
+      'Documents checked with the clinic',
+      'Registered rescue organisation',
+    ]);
+  });
+
+  it('lets written notices replace the starters entirely', () => {
+    const resolved = parseSettings({ messageTemplates: 'Only one\nIts body.' });
+    expect(resolved.messageTemplates).toEqual([
+      { id: 'tpl0', label: 'Only one', body: 'Its body.' },
+    ]);
   });
 
   it('caches reads for the configured window and refreshes after it', async () => {
@@ -162,7 +181,7 @@ describe('settings', () => {
       },
       new FakeConfigRepo(),
     );
-    await expect(reader.get()).resolves.toEqual(DEFAULT_SETTINGS);
+    await expect(reader.get()).resolves.toEqual(parseSettings({}));
   });
 });
 
@@ -318,7 +337,7 @@ describe('settings override layer', () => {
     };
 
     const resolved = await createSettingsReader({ getAll: async () => ({}) }, broken).get();
-    expect(resolved).toEqual(DEFAULT_SETTINGS);
+    expect(resolved).toEqual(parseSettings({}));
   });
 });
 
@@ -441,8 +460,8 @@ describe('editable default notice', () => {
   it('offers starter notices that parse into two titled blocks', () => {
     const templates = parseMessageTemplates(starterTemplates());
     expect(templates.map((template) => template.label)).toEqual([
-      'Verified with full documents',
-      'Verified for a registered rescue',
+      'Documents checked with the clinic',
+      'Registered rescue organisation',
     ]);
     expect(templates[0]?.body).toContain('not a guarantee');
   });

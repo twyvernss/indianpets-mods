@@ -203,7 +203,7 @@ Layer 1 wins over layer 2, which wins over the built-in defaults.
 | Add a mod note on the OP | on | Records who verified and when. Skipped if the poster's account is deleted. |
 | Name the verifying moderator in the public comment | **off** | Leave this off. Turning it on puts a moderator's username on the post, which is exactly what causes the unsolicited DMs this app exists to prevent. |
 | Which flair marks a fundraiser | none (every post) | A dropdown of the subreddit's real post flairs. When set, the bot only replies to and reports posts with that flair. Falls back to a text box on a subreddit with no flairs. |
-| Saved notices | two starter blocks | Two or three pre-written verification notices a moderator picks from at verify time. One per block, separated by a line containing only `---`; the first line of each block is its name. |
+| Saved notices | two starter notices, active immediately | Two or three pre-written verification notices a moderator picks from at verify time. One per block, separated by a line containing only `---`; the first line of each block is its name. |
 | Checklist items | built-in list | One item per line. Markdown bullets are tolerated. Max 20 items, 120 characters each. |
 | Compact checklist | on | One multi-select tick-list instead of a row of toggles. Keeps the form short, which matters on mobile. |
 | Custom verification notice | blank | Replaces the built-in comment. Supports `{subreddit}`, `{date}`, `{mod}`. Keep the "not a guarantee" and "donate at your own discretion" language. |
@@ -311,6 +311,13 @@ added twice.
 
 ### Picking a notice at verify time
 
+The picker appears on the verify form as soon as the subreddit has any saved notices, and a fresh
+install **already has two** ("Documents checked with the clinic", "Registered rescue organisation").
+An empty settings box means "use the starters" rather than "no notices", because a prefilled form
+field that has never been saved is invisible to the app - the picker would otherwise stay hidden
+until somebody opened settings and pressed Save for no visible reason. Writing anything in the box
+replaces the starters entirely.
+
 The mod team can save two or three wordings (full documents, registered rescue, partial paperwork)
 in settings. When any exist, the verify form grows a dropdown; picking one uses that wording for the
 public comment, and the record stores which was used. The **body always comes from the server** —
@@ -387,7 +394,7 @@ npm run test:types
 npm run check
 ```
 
-186 tests across pure logic (sanitisation, dates, retry classification, settings resolution and
+188 tests across pure logic (sanitisation, dates, retry classification, settings resolution and
 clamping, checklist parsing, comment wording, URL normalisation, hashing) and the four services
 against in-memory fakes: idempotency, concurrent runs, expired and mismatched tokens, missing posts,
 deleted authors, v1→v2 record migration, every partial-failure path, duplicate races, link release
@@ -405,5 +412,5 @@ service layer, which is tested; the handlers are exercised during playtest.
 
 ## Test counts
 
-186 unit tests across six files. Everything below the HTTP handlers is covered; the handlers
+188 unit tests across six files. Everything below the HTTP handlers is covered; the handlers
 themselves are exercised during playtest.

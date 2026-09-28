@@ -1,6 +1,6 @@
 import { CONFIG } from './config.js';
 import type { ConfigRepo } from './data/configRepo.js';
-import { DEFAULT_CHECKLIST_LABELS } from './text.js';
+import { DEFAULT_CHECKLIST_LABELS, starterTemplates } from './text.js';
 import type { ChecklistItem, MessageTemplate } from './types.js';
 
 /**
@@ -128,6 +128,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   addModNote: true,
   showVerifyingModInComment: false,
   customNoticeText: '',
+  // Left empty here on purpose: DEFAULT_SETTINGS is evaluated at module load,
+  // before TEMPLATE_SEPARATOR exists, so calling the parser here would be a
+  // temporal dead zone error. The starter notices are applied in parseSettings
+  // instead, which only ever runs at request time.
   messageTemplates: [],
   checklistItems: toChecklistItems(DEFAULT_CHECKLIST_LABELS),
   compactChecklist: true,
@@ -305,7 +309,13 @@ export function parseSettings(raw: Record<string, unknown>): AppSettings {
       DEFAULT_SETTINGS.showVerifyingModInComment,
     ),
     customNoticeText: coerceString(raw['customNoticeText'], DEFAULT_SETTINGS.customNoticeText),
-    messageTemplates: parseMessageTemplates(raw['messageTemplates']),
+    // An unset box means "use the starter notices", so the picker works on a
+    // fresh install without anybody having to open settings and press Save.
+    // Writing something in the box replaces them entirely.
+    messageTemplates: (() => {
+      const parsed = parseMessageTemplates(raw['messageTemplates']);
+      return parsed.length > 0 ? parsed : parseMessageTemplates(starterTemplates());
+    })(),
     checklistItems: parseChecklistItems(raw['checklistItems']),
     fundraiserFlairText: coerceSelectString(
       raw['fundraiserFlairText'],

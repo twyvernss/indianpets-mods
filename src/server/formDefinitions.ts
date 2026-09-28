@@ -82,8 +82,11 @@ export function verifyFormResponse(input: {
   // The author line goes at the top of the description rather than in a
   // disabled field, because a disabled field still looks like something the
   // moderator is meant to fill in.
+  // Devvit collapses newlines inside a form description, so the author line is
+  // joined with sentence punctuation rather than a blank line - otherwise it
+  // runs straight into the next sentence.
   const description = input.authorSummary
-    ? `${input.authorSummary}\n\n${FORM_TEXT.verifyDescription}`
+    ? `${input.authorSummary}. ${FORM_TEXT.verifyDescription}`
     : FORM_TEXT.verifyDescription;
 
   return {
@@ -102,7 +105,8 @@ export function verifyFormResponse(input: {
                 {
                   type: 'select',
                   name: 'template',
-                  label: 'Which notice should the bot post?',
+                  label: 'Message to post',
+                  helpText: 'Pick the wording that fits. Edit the list in the settings menu.',
                   options: [
                     { label: 'Default verification notice', value: DEFAULT_TEMPLATE_OPTION },
                     ...input.templates.map((template) => ({
