@@ -5,6 +5,7 @@ import type { RedisPort } from '../data/redisPort.js';
 import type { Logger } from '../lib/logger.js';
 import { describeError } from '../lib/logger.js';
 import type { SettingsReader } from '../settings.js';
+import { matchesFundraiserFlair } from '../settings.js';
 import { renderIntakeComment } from '../text.js';
 import type { RedditPort, SchedulerPort } from './redditPort.js';
 
@@ -113,6 +114,17 @@ export function createIntakeService(deps: IntakeDeps): IntakeService {
       // and an "we need documents" comment would just be noise.
       if (post.isApproved && !post.isRemoved) {
         log.info('intake reply skipped: post already approved', { postId });
+        return;
+      }
+
+      // AutoModerator holds posts for many reasons. When the subreddit has told
+      // us which flair marks a fundraiser, anything else is somebody else's
+      // problem and must not get a "send us your vet bill" comment.
+      if (!matchesFundraiserFlair(post.flairText, config.fundraiserFlairText)) {
+        log.info('intake reply skipped: not flaired as a fundraiser', {
+          postId,
+          flair: post.flairText ?? 'none',
+        });
         return;
       }
 

@@ -85,6 +85,7 @@ function recordFixture(overrides: Partial<VerificationRecord> = {}): Verificatio
     note: '',
     checklist: null,
     commentId: 't1_x',
+    templateLabel: null,
     deletedAtMs: null,
     reminderSentAtMs: null,
     opRespondedAtMs: null,
@@ -156,6 +157,7 @@ describe('begin', () => {
       contextPostId: null,
       note: '',
       checklistAnswers: null,
+      templateId: null,
     });
 
     expect((await h.service.begin(POST_ID)).kind).toBe('already-verified');
@@ -175,6 +177,7 @@ describe('complete - happy path', () => {
       contextPostId: null,
       note: 'called the clinic',
       checklistAnswers: null,
+      templateId: null,
     });
 
     expect(outcome.kind).toBe('ok');
@@ -189,6 +192,7 @@ describe('complete - happy path', () => {
       contextPostId: null,
       note: 'called the clinic',
       checklistAnswers: null,
+      templateId: null,
     });
 
     expect(await h.repo.get(POST_ID)).toMatchObject({
@@ -211,6 +215,7 @@ describe('complete - happy path', () => {
       contextPostId: null,
       note: '',
       checklistAnswers: null,
+      templateId: null,
     });
     expect(h.reddit.lastCommentText).not.toContain('mod_one');
     expect(h.reddit.lastCommentText).toContain('not a guarantee');
@@ -222,6 +227,7 @@ describe('complete - happy path', () => {
       contextPostId: null,
       note: 'x'.repeat(CONFIG.noteMaxLength),
       checklistAnswers: null,
+      templateId: null,
     });
     expect(h.reddit.lastModNote?.note.length ?? 0).toBeLessThanOrEqual(CONFIG.modNoteMaxLength);
   });
@@ -247,6 +253,7 @@ describe('checklist', () => {
       contextPostId: null,
       note: '',
       checklistAnswers: { item0: true, item2: true },
+      templateId: null,
     });
 
     const record = await h.repo.get(POST_ID);
@@ -273,6 +280,7 @@ describe('checklist', () => {
       contextPostId: null,
       note: '',
       checklistAnswers: { item1: true },
+      templateId: null,
     });
 
     expect(await h.repo.get(POST_ID).then((r) => r?.checklist)).toEqual([
@@ -289,6 +297,7 @@ describe('checklist', () => {
       contextPostId: null,
       note: '',
       checklistAnswers: null,
+      templateId: null,
     });
 
     expect((await h.repo.get(POST_ID))?.checklist).toBeNull();
@@ -312,6 +321,7 @@ describe('author history', () => {
       contextPostId: null,
       note: 'first',
       checklistAnswers: null,
+      templateId: null,
     });
     await h.repo.markDeleted(POST_ID, NOW + 1000);
 
@@ -333,6 +343,7 @@ describe('author history', () => {
       contextPostId: null,
       note: '',
       checklistAnswers: null,
+      templateId: null,
     });
 
     // A different post by the same author, same installation.
@@ -356,6 +367,7 @@ describe('author history', () => {
       contextPostId: null,
       note: '',
       checklistAnswers: null,
+      templateId: null,
     });
 
     expect(await h.repo.getAuthorHistory('op_user', 10)).toHaveLength(0);
@@ -371,6 +383,7 @@ describe('complete - idempotency', () => {
       contextPostId: null,
       note: '',
       checklistAnswers: null,
+      templateId: null,
     });
     const firstCount = h.reddit.calls.filter((call) => call === 'comment').length;
 
@@ -379,6 +392,7 @@ describe('complete - idempotency', () => {
       contextPostId: POST_ID,
       note: '',
       checklistAnswers: null,
+      templateId: null,
     });
 
     expect(second.kind).toBe('already-verified');
@@ -394,6 +408,7 @@ describe('complete - idempotency', () => {
       contextPostId: null,
       note: '',
       checklistAnswers: null,
+      templateId: null,
     });
 
     expect(outcome).toEqual({ kind: 'in-progress' });
@@ -409,6 +424,7 @@ describe('complete - idempotency', () => {
       contextPostId: null,
       note: '',
       checklistAnswers: null,
+      templateId: null,
     });
     expect(blocked).toEqual({ kind: 'in-progress' });
 
@@ -418,6 +434,7 @@ describe('complete - idempotency', () => {
       contextPostId: null,
       note: '',
       checklistAnswers: null,
+      templateId: null,
     });
     expect(retried.kind).toBe('ok');
   });
@@ -431,6 +448,7 @@ describe('complete - authorisation', () => {
       contextPostId: POST_ID,
       note: '',
       checklistAnswers: null,
+      templateId: null,
     });
     expect(outcome).toEqual({ kind: 'expired' });
     expect(h.reddit.calls).not.toContain('comment');
@@ -438,22 +456,29 @@ describe('complete - authorisation', () => {
 
   it('rejects a token minted for a different moderator', async () => {
     const h = harness({ currentUser: 'mod_two' });
-    await h.tokens.mint({ postId: POST_ID, modName: 'mod_one', createdAtMs: NOW, checklist: null });
+    await h.tokens.mint({ postId: POST_ID, modName: 'mod_one', createdAtMs: NOW, checklist: null, templates: null });
 
     await expect(
-      h.service.complete({ token: 'token-1', contextPostId: null, note: '', checklistAnswers: null }),
+      h.service.complete({
+        token: 'token-1',
+        contextPostId: null,
+        note: '',
+        checklistAnswers: null,
+        templateId: null,
+      }),
     ).resolves.toEqual({ kind: 'not-moderator' });
   });
 
   it('rejects a user who lost moderator status between the form and the submit', async () => {
     const h = harness({ currentUser: 'mod_one', moderators: [] });
-    await h.tokens.mint({ postId: POST_ID, modName: 'mod_one', createdAtMs: NOW, checklist: null });
+    await h.tokens.mint({ postId: POST_ID, modName: 'mod_one', createdAtMs: NOW, checklist: null, templates: null });
 
     const outcome = await h.service.complete({
       token: 'token-1',
       contextPostId: null,
       note: '',
       checklistAnswers: null,
+      templateId: null,
     });
     expect(outcome).toEqual({ kind: 'not-moderator' });
     expect(h.reddit.calls).not.toContain('comment');
@@ -462,19 +487,26 @@ describe('complete - authorisation', () => {
   it('expires when neither a token nor a platform post id is available', async () => {
     const h = harness();
     await expect(
-      h.service.complete({ token: null, contextPostId: null, note: '', checklistAnswers: null }),
+      h.service.complete({
+        token: null,
+        contextPostId: null,
+        note: '',
+        checklistAnswers: null,
+        templateId: null,
+      }),
     ).resolves.toEqual({ kind: 'expired' });
   });
 
   it('refuses to act while the master switch is off', async () => {
     const h = harness({}, { enabled: false });
-    await h.tokens.mint({ postId: POST_ID, modName: 'mod_one', createdAtMs: NOW, checklist: null });
+    await h.tokens.mint({ postId: POST_ID, modName: 'mod_one', createdAtMs: NOW, checklist: null, templates: null });
 
     const outcome = await h.service.complete({
       token: 'token-1',
       contextPostId: null,
       note: '',
       checklistAnswers: null,
+      templateId: null,
     });
     expect(outcome.kind).toBe('failed');
     expect(h.reddit.calls).not.toContain('comment');
@@ -484,7 +516,7 @@ describe('complete - authorisation', () => {
 describe('complete - failure handling', () => {
   it('skips the approve call when the post is already approved', async () => {
     const h = harness({
-      post: { id: POST_ID, authorName: 'op_user', isApproved: true, isRemoved: false },
+      post: { id: POST_ID, authorName: 'op_user', isApproved: true, isRemoved: false, flairText: null },
     });
 
     await h.service.complete({
@@ -492,6 +524,7 @@ describe('complete - failure handling', () => {
       contextPostId: null,
       note: '',
       checklistAnswers: null,
+      templateId: null,
     });
 
     expect(h.reddit.calls).not.toContain('approve');
@@ -505,6 +538,7 @@ describe('complete - failure handling', () => {
       contextPostId: null,
       note: '',
       checklistAnswers: null,
+      templateId: null,
     });
 
     expect(outcome).toEqual({ kind: 'post-missing' });
@@ -519,6 +553,7 @@ describe('complete - failure handling', () => {
       contextPostId: null,
       note: '',
       checklistAnswers: null,
+      templateId: null,
     });
 
     expect(outcome.kind).toBe('failed');
@@ -537,6 +572,7 @@ describe('complete - failure handling', () => {
       contextPostId: null,
       note: '',
       checklistAnswers: null,
+      templateId: null,
     });
 
     expect(outcome.kind).toBe('partial');
@@ -552,6 +588,7 @@ describe('complete - failure handling', () => {
       contextPostId: null,
       note: '',
       checklistAnswers: null,
+      templateId: null,
     });
 
     expect(outcome.kind).toBe('partial');
@@ -567,6 +604,7 @@ describe('complete - failure handling', () => {
       contextPostId: null,
       note: '',
       checklistAnswers: null,
+      templateId: null,
     });
 
     expect(outcome.kind).toBe('partial');
@@ -575,7 +613,7 @@ describe('complete - failure handling', () => {
 
   it('skips the mod note entirely when the author account is deleted', async () => {
     const h = harness({
-      post: { id: POST_ID, authorName: null, isApproved: false, isRemoved: true },
+      post: { id: POST_ID, authorName: null, isApproved: false, isRemoved: true, flairText: null },
     });
 
     const outcome = await h.service.complete({
@@ -583,6 +621,7 @@ describe('complete - failure handling', () => {
       contextPostId: null,
       note: '',
       checklistAnswers: null,
+      templateId: null,
     });
 
     expect(outcome.kind).toBe('ok');
@@ -597,6 +636,7 @@ describe('complete - failure handling', () => {
       contextPostId: null,
       note: '',
       checklistAnswers: null,
+      templateId: null,
     });
     expect(h.reddit.calls).not.toContain('modNote');
   });
@@ -610,6 +650,7 @@ describe('status', () => {
       contextPostId: null,
       note: 'note',
       checklistAnswers: null,
+      templateId: null,
     });
     expect((await h.service.status(POST_ID)).kind).toBe('verified');
   });
@@ -638,6 +679,7 @@ describe('deletion handling', () => {
       contextPostId: null,
       note: 'clinic phone number redacted',
       checklistAnswers: null,
+      templateId: null,
     });
 
     await h.repo.markDeleted(POST_ID, NOW + 1000);
@@ -657,6 +699,7 @@ describe('deletion handling', () => {
       contextPostId: POST_ID,
       note: '',
       checklistAnswers: null,
+      templateId: null,
     });
     expect(retry.kind).toBe('already-verified');
   });
@@ -723,7 +766,66 @@ describe('storage', () => {
       contextPostId: POST_ID,
       note: '',
       checklistAnswers: null,
+      templateId: null,
     });
     expect(retry.kind).toBe('already-verified');
+  });
+});
+
+describe('notice templates', () => {
+  const templates = [
+    { id: 'tpl0', label: 'Full documents', body: 'Checked in full for r/{subreddit}.' },
+    { id: 'tpl1', label: 'Rescue org', body: 'Registered rescue, verified {date}.' },
+  ];
+
+  it('offers the configured templates on the form', async () => {
+    const h = harness({}, { messageTemplates: templates });
+    const outcome = await h.service.begin(POST_ID);
+    if (outcome.kind !== 'ready') throw new Error('expected ready');
+    expect(outcome.templates.map((t) => t.label)).toEqual(['Full documents', 'Rescue org']);
+  });
+
+  it('posts the chosen template and records which one was used', async () => {
+    const h = harness({}, { messageTemplates: templates });
+    const outcome = await h.service.begin(POST_ID);
+    if (outcome.kind !== 'ready') throw new Error('expected ready');
+
+    await h.service.complete({
+      token: outcome.token,
+      contextPostId: null,
+      note: '',
+      checklistAnswers: null,
+      templateId: 'tpl1',
+    });
+
+    expect(h.reddit.lastCommentText).toContain('Registered rescue');
+    expect((await h.repo.get(POST_ID))?.templateLabel).toBe('Rescue org');
+  });
+
+  it('falls back to the built-in notice when the default option is chosen', async () => {
+    const h = harness({}, { messageTemplates: templates });
+    await h.service.complete({
+      token: await tokenFor(h),
+      contextPostId: null,
+      note: '',
+      checklistAnswers: null,
+      templateId: 'default',
+    });
+
+    expect(h.reddit.lastCommentText).toContain('not a guarantee');
+    expect((await h.repo.get(POST_ID))?.templateLabel).toBeNull();
+  });
+
+  it('ignores an unknown template id rather than posting nothing', async () => {
+    const h = harness({}, { messageTemplates: templates });
+    await h.service.complete({
+      token: await tokenFor(h),
+      contextPostId: null,
+      note: '',
+      checklistAnswers: null,
+      templateId: 'tpl-does-not-exist',
+    });
+
+    expect(h.reddit.lastCommentText).toContain('not a guarantee');
   });
 });

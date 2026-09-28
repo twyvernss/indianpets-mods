@@ -1,9 +1,14 @@
 import type { FormField, UiResponse } from '@devvit/web/shared';
 import { CONFIG } from './config.js';
 import type { AppSettings } from './settings.js';
-import { checklistItemsToText } from './settings.js';
+import {
+  ANY_FLAIR,
+  checklistItemsToText,
+  messageTemplatesToText,
+  TEMPLATE_SEPARATOR,
+} from './settings.js';
 import { FORM_TEXT } from './text.js';
-import type { ChecklistItem } from './types.js';
+import type { ChecklistItem, MessageTemplate } from './types.js';
 
 /**
  * Form definitions.
@@ -62,12 +67,17 @@ function checklistFields(items: readonly ChecklistItem[], compact: boolean): For
   ];
 }
 
+/** The option a moderator picks to keep the built-in notice wording. */
+export const DEFAULT_TEMPLATE_OPTION = 'default';
+
 export function verifyFormResponse(input: {
   token: string;
   /** Moderator-only context line, or null. */
   authorSummary: string | null;
   items: readonly ChecklistItem[];
   compactChecklist: boolean;
+  /** Pre-written notices. Empty means the picker is not shown at all. */
+  templates: readonly MessageTemplate[];
 }): UiResponse {
   // The author line goes at the top of the description rather than in a
   // disabled field, because a disabled field still looks like something the
@@ -85,6 +95,25 @@ export function verifyFormResponse(input: {
         acceptLabel: FORM_TEXT.verifyAccept,
         cancelLabel: FORM_TEXT.verifyCancel,
         fields: [
+          // Only shown when the subreddit has actually written some; a
+          // one-option dropdown is just clutter.
+          ...(input.templates.length > 0
+            ? ([
+                {
+                  type: 'select',
+                  name: 'template',
+                  label: 'Which notice should the bot post?',
+                  options: [
+                    { label: 'Default verification notice', value: DEFAULT_TEMPLATE_OPTION },
+                    ...input.templates.map((template) => ({
+                      label: template.label,
+                      value: template.id,
+                    })),
+                  ],
+                  defaultValue: [DEFAULT_TEMPLATE_OPTION],
+                },
+              ] satisfies FormField[])
+            : []),
           ...checklistFields(input.items, input.compactChecklist),
           {
             type: 'paragraph',
@@ -112,8 +141,38 @@ export function verifyFormResponse(input: {
  * override that takes effect on the next action - no trip to
  * developers.reddit.com, no redeploy.
  */
-export function settingsFormResponse(current: AppSettings): UiResponse {
+export function settingsFormResponse(
+  current: AppSettings,
+  /** The subreddit's live post flairs. Empty on a sub with none, e.g. a test sub. */
+  availableFlairs: readonly { id: string; text: string }[] = [],
+): UiResponse {
   const { reminders } = CONFIG;
+
+  // A dropdown of the subreddit's real flairs when there are any; a plain text
+  // box otherwise, so a brand new test subreddit is not stuck with an empty
+  // menu and no way to type a value.
+  const flairField: FormField =
+    availableFlairs.length > 0
+      ? {
+          type: 'select',
+          name: 'fundraiserFlairText',
+          label: 'Which flair marks a fundraiser?',
+          helpText:
+            'The bot only replies to and reports posts with this flair. Choose "Any post" to switch the filter off.',
+          options: [
+            { label: 'Any post (no flair filter)', value: ANY_FLAIR },
+            ...availableFlairs.map((flair) => ({ label: flair.text, value: flair.text })),
+          ],
+          defaultValue: [current.fundraiserFlairText.length > 0 ? current.fundraiserFlairText : ANY_FLAIR],
+        }
+      : {
+          type: 'string',
+          name: 'fundraiserFlairText',
+          label: 'Which flair marks a fundraiser?',
+          helpText:
+            'This subreddit has no post flairs yet, so type the flair text by hand. Leave blank to apply the bot to every post.',
+          defaultValue: current.fundraiserFlairText,
+        };
 
   return {
     showForm: {
@@ -166,6 +225,14 @@ export function settingsFormResponse(current: AppSettings): UiResponse {
               },
               {
                 type: 'paragraph',
+                name: 'messageTemplates',
+                label: 'Saved notices a moderator can pick from',
+                helpText: `One per block, separated by a line containing only ${TEMPLATE_SEPARATOR}. The first line of each block is its name in the dropdown, the rest is the comment. Placeholders: {subreddit}, {date}, {mod}. Maximum ${CONFIG.maxMessageTemplates}.`,
+                lineHeight: 8,
+                defaultValue: messageTemplatesToText(current.messageTemplates),
+              },
+              {
+                type: 'paragraph',
                 name: 'customNoticeText',
                 label: 'Custom verification notice',
                 helpText:
@@ -205,6 +272,7 @@ export function settingsFormResponse(current: AppSettings): UiResponse {
               },
             ],
           },
+          flairField,
           {
             type: 'group',
             label: 'Duplicate fundraiser links',

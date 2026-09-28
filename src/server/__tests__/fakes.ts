@@ -125,6 +125,7 @@ export type FakeRedditOptions = {
   moderators?: readonly string[];
   currentUser?: string | null;
   author?: AuthorSnapshot | null;
+  flairs?: readonly { id: string; text: string }[];
   failOn?: Partial<
     Record<'approve' | 'comment' | 'distinguish' | 'modNote' | 'report' | 'lock', Error>
   >;
@@ -161,7 +162,13 @@ export class FakeReddit implements RedditPort {
     this.calls.push('getPost');
     if (this.options.post === null) return null;
     return (
-      this.options.post ?? { id: postId, authorName: 'op_user', isApproved: false, isRemoved: true }
+      this.options.post ?? {
+        id: postId,
+        authorName: 'op_user',
+        isApproved: false,
+        isRemoved: true,
+        flairText: null,
+      }
     );
   }
 
@@ -216,6 +223,11 @@ export class FakeReddit implements RedditPort {
     this.calls.push('getAuthor');
     if (this.options.author === null) return null;
     return this.options.author ?? { username, accountAgeDays: 400, karma: 5000 };
+  }
+
+  async getPostFlairs(): Promise<{ id: string; text: string }[]> {
+    this.calls.push('getPostFlairs');
+    return [...(this.options.flairs ?? [])];
   }
 }
 

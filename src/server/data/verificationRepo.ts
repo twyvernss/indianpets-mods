@@ -45,6 +45,10 @@ export type VerificationRepo = {
    * here before and then removed the evidence.
    */
   getAuthorHistory(username: string, limit: number): Promise<{ postId: T3; verifiedAtMs: number }[]>;
+  /** A page of every verification ever made, oldest first. For the backfill. */
+  allVerified(offset: number, limit: number): Promise<T3[]>;
+  /** Adds one entry to an author's history. Idempotent (a sorted set). */
+  recordAuthorVerification(username: string, postId: T3, verifiedAtMs: number): Promise<void>;
 
   recordAutomodHold(postId: T3, heldAtMs: number, nowMs: number): Promise<void>;
   getAutomodHold(postId: T3): Promise<number | null>;
@@ -95,6 +99,7 @@ function upgradeRecord(value: Record<string, unknown>): Record<string, unknown> 
     ...value,
     schemaVersion: RECORD_SCHEMA_VERSION,
     checklist,
+    templateLabel: null,
     reminderSentAtMs: null,
     opRespondedAtMs: null,
     escalatedAtMs: null,
@@ -143,6 +148,11 @@ export function isVerificationRecord(value: unknown): value is VerificationRecor
 
   const checklist = upgraded['checklist'];
   if (checklist !== null && !isChecklistResults(checklist)) return false;
+
+  // Added after the first release; a row written before it is still valid.
+  const templateLabel = upgraded['templateLabel'];
+  if (templateLabel === undefined) upgraded['templateLabel'] = null;
+  else if (templateLabel !== null && typeof templateLabel !== 'string') return false;
 
   // Copy the upgraded fields back so the caller receives the v2 shape even when
   // the stored row was v1. Safe because `upgraded` is either `value` itself or
@@ -287,6 +297,18 @@ export function createVerificationRepo(redis: RedisPort): VerificationRepo {
       }));
     },
 
+    async allVerified(offset, limit) {
+      const entries = await redis.zRange(keys.verifiedIndex(), 0, Number.MAX_SAFE_INTEGER, {
+        by: 'score',
+        limit: { offset, count: limit },
+      });
+      return entries.map((entry) => entry.member as T3);
+    },
+
+    async recordAuthorVerification(username, postId, verifiedAtMs) {
+      await redis.zAdd(keys.authorHistory(username), { member: postId, score: verifiedAtMs });
+    },
+
     async recordAutomodHold(postId, heldAtMs, nowMs) {
       await redis.set(keys.automodHold(postId), String(heldAtMs), {
         expiration: new Date(nowMs + CONFIG.automodHoldTtlSeconds * 1000),
@@ -321,6 +343,7 @@ export function newPendingRecord(input: {
     note: input.note,
     checklist: input.checklist,
     commentId: null,
+    templateLabel: null,
     deletedAtMs: null,
     reminderSentAtMs: null,
     opRespondedAtMs: null,

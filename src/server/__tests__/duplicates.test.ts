@@ -364,6 +364,7 @@ describe('legitimate reposts', () => {
       note: '',
       checklist: null,
       commentId: 't1_x',
+      templateLabel: null,
       deletedAtMs: null,
       reminderSentAtMs: null,
       opRespondedAtMs: null,
@@ -374,5 +375,43 @@ describe('legitimate reposts', () => {
     await h.service.report(finding!);
 
     expect(h.reddit.reports[0]?.reason).toContain('verified');
+  });
+});
+
+describe('fundraiser flair gating', () => {
+  const snapshot = (flairText: string | null) => ({
+    id: 't3_second' as T3,
+    authorName: 'bob',
+    isApproved: false,
+    isRemoved: false,
+    flairText,
+  });
+
+  it('reports a duplicate on a post carrying the fundraiser flair', async () => {
+    const h = harness({ fundraiserFlairText: 'Fundraiser' }, { post: snapshot('Fundraiser') });
+    await h.service.inspectPost(post('t3_first', 'alice', KETTO));
+    const finding = await h.service.inspectPost(post('t3_second', 'bob', KETTO));
+
+    await h.service.report(finding!);
+    expect(h.reddit.reports).toHaveLength(1);
+  });
+
+  it('does not report a duplicate on a post that is not a fundraiser', async () => {
+    const h = harness({ fundraiserFlairText: 'Fundraiser' }, { post: snapshot('Discussion') });
+    await h.service.inspectPost(post('t3_first', 'alice', KETTO));
+    const finding = await h.service.inspectPost(post('t3_second', 'bob', KETTO));
+
+    await h.service.report(finding!);
+    expect(h.reddit.reports).toHaveLength(0);
+  });
+
+  it('skips the flair lookup entirely when no flair is configured', async () => {
+    const h = harness({ fundraiserFlairText: '' });
+    await h.service.inspectPost(post('t3_first', 'alice', KETTO));
+    const finding = await h.service.inspectPost(post('t3_second', 'bob', KETTO));
+
+    await h.service.report(finding!);
+    expect(h.reddit.reports).toHaveLength(1);
+    expect(h.reddit.calls.filter((call) => call === 'getPost')).toHaveLength(0);
   });
 });

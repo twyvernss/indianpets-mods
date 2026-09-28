@@ -54,7 +54,8 @@
     "onAutomoderatorFilterPost": "/internal/triggers/automod-filter-post",
     "onPostSubmit": "/internal/triggers/post-submit",
     "onCommentCreate": "/internal/triggers/comment-create",
-    "onPostDelete": "/internal/triggers/post-delete"
+    "onPostDelete": "/internal/triggers/post-delete",
+    "onAppUpgrade": "/internal/triggers/app-upgrade"
   },
   "scheduler": {
     "tasks": {
@@ -70,6 +71,9 @@
       },
       "automod-reply": {
         "endpoint": "/internal/jobs/automod-reply"
+      },
+      "author-backfill": {
+        "endpoint": "/internal/jobs/author-backfill"
       }
     }
   },
@@ -95,6 +99,11 @@
         "label": "Custom verification notice. Blank uses the built-in wording. Placeholders: {subreddit}, {date}, {mod}",
         "defaultValue": ""
       },
+      "messageTemplates": {
+        "type": "paragraph",
+        "label": "Saved notices a moderator can pick from. One per block separated by a line containing only ---. First line of each block is its name.",
+        "defaultValue": ""
+      },
       "checklistItems": {
         "type": "paragraph",
         "label": "Verification checklist items, one per line. Blank uses the built-in list.",
@@ -104,6 +113,11 @@
         "type": "boolean",
         "label": "Compact checklist: one tick-list instead of a row of toggles (shorter form, better on mobile)",
         "defaultValue": true
+      },
+      "fundraiserFlairText": {
+        "type": "string",
+        "label": "Post flair that marks a fundraiser (blank = every post). Easier to set from the in-subreddit settings menu, which lists your actual flairs.",
+        "defaultValue": ""
       },
       "automodReplyEnabled": {
         "type": "boolean",

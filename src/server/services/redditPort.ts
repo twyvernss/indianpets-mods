@@ -16,6 +16,8 @@ export type PostSnapshot = {
   authorName: string | null;
   isApproved: boolean;
   isRemoved: boolean;
+  /** Plain-text post flair, or null. Used to tell fundraisers from other posts. */
+  flairText: string | null;
 };
 
 /** Author facts used only to annotate a modqueue report. */
@@ -69,6 +71,11 @@ export type RedditPort = {
   lockPost(postId: T3): Promise<void>;
   /** Returns null when the account is deleted, suspended or unreadable. */
   getAuthor(username: string): Promise<AuthorSnapshot | null>;
+  /**
+   * The subreddit's post flair templates, for the settings dropdown.
+   * Returns an empty list if the subreddit has none or they cannot be read.
+   */
+  getPostFlairs(): Promise<{ id: string; text: string }[]>;
 };
 
 /** The slice of Devvit's scheduler this app uses. */

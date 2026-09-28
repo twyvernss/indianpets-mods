@@ -51,9 +51,19 @@ export const CONFIG = {
    */
   authorHistoryLimit: 10,
 
+  /** Records rebuilt per backfill run. Pure Redis work, so this can be larger. */
+  backfillBatchSize: 100,
+  /** Ceiling on chained backfill runs: 200 x 100 = 20,000 records. */
+  maxBackfillBatches: 200,
+
   /** Guard rails on the moderator-configurable checklist. */
   maxChecklistItems: 20,
   checklistLabelMaxLength: 120,
+
+  /** Guard rails on moderator-written notice templates. */
+  maxMessageTemplates: 5,
+  templateLabelMaxLength: 60,
+  templateBodyMaxLength: 4000,
 
   retry: {
     attempts: 3,
@@ -138,6 +148,8 @@ export const JOBS = {
   duplicateReport: 'duplicate-report',
   /** Replies to an OP whose fundraiser AutoModerator has just held. */
   automodReply: 'automod-reply',
+  /** Rebuilds the per-author history from existing verification records. */
+  authorBackfill: 'author-backfill',
 } as const;
 
 /**

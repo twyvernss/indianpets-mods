@@ -58,6 +58,7 @@ export function createRedditAdapter(log: Logger): RedditPort {
           authorName: post.authorName && post.authorName !== '[deleted]' ? post.authorName : null,
           isApproved: post.isApproved(),
           isRemoved: post.isRemoved(),
+          flairText: post.flair?.text ?? null,
         };
       } catch (error) {
         log.warn('post could not be loaded', { postId, reason: describeError(error) });
@@ -128,6 +129,22 @@ export function createRedditAdapter(log: Logger): RedditPort {
       } catch (error) {
         log.warn('author could not be loaded', { username, reason: describeError(error) });
         return null;
+      }
+    },
+
+    async getPostFlairs(): Promise<{ id: string; text: string }[]> {
+      try {
+        const templates = await run('getPostFlairTemplates', () =>
+          reddit.getPostFlairTemplates(context.subredditName),
+        );
+        return templates
+          .map((template) => ({ id: template.id, text: template.text }))
+          .filter((flair) => flair.text.trim().length > 0);
+      } catch (error) {
+        // A subreddit with no flairs, or a permissions hiccup, must not stop the
+        // settings form from opening.
+        log.warn('post flairs could not be listed', { reason: describeError(error) });
+        return [];
       }
     },
   };

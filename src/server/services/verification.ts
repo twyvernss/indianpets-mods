@@ -12,6 +12,7 @@ import { buildModNote, buildVerificationComment, formatAuthorSummary } from '../
 import type {
   ChecklistItem,
   ChecklistItemResult,
+  MessageTemplate,
   VerificationRecord,
   VerifyOutcome,
 } from '../types.js';
@@ -30,6 +31,8 @@ export type BeginOutcome =
       authorSummary: string | null;
       items: ChecklistItem[];
       compactChecklist: boolean;
+      /** Notice wordings the moderator may pick from. Empty means default only. */
+      templates: MessageTemplate[];
     }
   | { kind: 'already-verified'; record: VerificationRecord }
   | { kind: 'not-moderator' }
@@ -79,11 +82,16 @@ export type VerificationService = {
     note: string;
     /** Raw tick-box answers keyed by field id, or null for the quick path. */
     checklistAnswers: Record<string, boolean> | null;
+    /** Id of the chosen notice template, or null for the default wording. */
+    templateId: string | null;
   }): Promise<VerifyOutcome>;
 
   /** Read-only status lookup for the second menu action. */
   status(targetId: string): Promise<StatusOutcome>;
 };
+
+/** The option a moderator picks to keep the built-in wording. */
+export const DEFAULT_TEMPLATE_ID = 'default';
 
 export function formatVerifiedDate(epochMs: number): string {
   return formatDisplayDate(epochMs, CONFIG.displayTimeZoneOffsetMinutes, CONFIG.displayTimeZoneLabel);
@@ -165,6 +173,7 @@ export function createVerificationService(deps: VerificationDeps): VerificationS
           modName: username,
           createdAtMs: now(),
           checklist: config.checklistItems,
+          templates: config.messageTemplates,
         }),
         config.showAuthorSummary ? buildAuthorSummary(postId) : Promise.resolve(null),
       ]);
@@ -176,6 +185,7 @@ export function createVerificationService(deps: VerificationDeps): VerificationS
         authorSummary,
         items: config.checklistItems,
         compactChecklist: config.compactChecklist,
+        templates: config.messageTemplates,
       };
     },
 
@@ -198,10 +208,16 @@ export function createVerificationService(deps: VerificationDeps): VerificationS
       const config = await settings.get();
       if (!config.enabled) return { kind: 'failed', detail: 'The app is currently disabled.' };
 
-      // Pair the submitted answers with the labels that were actually shown.
+      // Pair the submitted answers with the labels that were actually shown,
+      // and resolve the chosen notice from the templates that were offered.
+      const payload = input.token ? await tokens.resolve(input.token) : null;
       const checklist = input.checklistAnswers
-        ? await resolveChecklist(input.token, input.checklistAnswers)
+        ? resolveChecklist(payload?.checklist ?? config.checklistItems, input.checklistAnswers)
         : null;
+      const template = resolveTemplate(
+        payload?.templates ?? config.messageTemplates,
+        input.templateId,
+      );
 
       if (input.token) await tokens.consume(input.token);
 
@@ -222,6 +238,7 @@ export function createVerificationService(deps: VerificationDeps): VerificationS
           username,
           note: input.note,
           checklist,
+          template,
           startedAt,
           scoped: scoped.child({ mod: username }),
         });
@@ -294,13 +311,26 @@ export function createVerificationService(deps: VerificationDeps): VerificationS
    * is gone, the current settings are used - slightly worse, never wrong enough
    * to matter, and far better than discarding the moderator's work.
    */
-  async function resolveChecklist(
-    token: string | null,
+  function resolveChecklist(
+    items: readonly ChecklistItem[],
     answers: Record<string, boolean>,
-  ): Promise<ChecklistItemResult[]> {
-    const payload = token ? await tokens.resolve(token) : null;
-    const items = payload?.checklist ?? (await settings.get()).checklistItems;
+  ): ChecklistItemResult[] {
     return items.map((item) => ({ label: item.label, checked: answers[item.id] === true }));
+  }
+
+  /**
+   * Resolves the chosen notice template.
+   *
+   * The BODY always comes from the server side, never from the form: the client
+   * only supplies an id. A moderator cannot type arbitrary text into the public
+   * comment through this path.
+   */
+  function resolveTemplate(
+    templates: readonly MessageTemplate[],
+    templateId: string | null,
+  ): MessageTemplate | null {
+    if (!templateId || templateId === DEFAULT_TEMPLATE_ID) return null;
+    return templates.find((template) => template.id === templateId) ?? null;
   }
 
   /**
@@ -320,10 +350,11 @@ export function createVerificationService(deps: VerificationDeps): VerificationS
     username: string;
     note: string;
     checklist: ChecklistItemResult[] | null;
+    template: MessageTemplate | null;
     startedAt: number;
     scoped: Logger;
   }): Promise<VerifyOutcome> {
-    const { postId, username, note, checklist, startedAt, scoped } = args;
+    const { postId, username, note, checklist, template, startedAt, scoped } = args;
 
     const [post, appSettings] = await Promise.all([reddit.getPost(postId), settings.get()]);
     if (!post) return { kind: 'post-missing' };
@@ -343,7 +374,9 @@ export function createVerificationService(deps: VerificationDeps): VerificationS
       subredditName: reddit.subredditName(),
       dateLabel,
       modName: appSettings.showVerifyingModInComment ? username : null,
-      customText: appSettings.customNoticeText,
+      // A picked template wins over the single custom notice, which in turn
+      // wins over the built-in wording.
+      customText: template?.body ?? appSettings.customNoticeText,
     });
 
     // Approving an already-approved post is a wasted round trip and an extra
@@ -388,7 +421,10 @@ export function createVerificationService(deps: VerificationDeps): VerificationS
       scoped.error('distinguish failed', { commentId: comment.id, reason: describeError(error) });
     }
 
-    await repo.putComplete(completeRecord(record, comment.id));
+    await repo.putComplete({
+      ...completeRecord(record, comment.id),
+      templateLabel: template?.label ?? null,
+    });
 
     if (appSettings.addModNote && post.authorName) {
       try {
@@ -410,6 +446,7 @@ export function createVerificationService(deps: VerificationDeps): VerificationS
       commentId: comment.id,
       durationMs: now() - startedAt,
       checklistUsed: checklist !== null,
+      template: template?.label ?? 'default',
       noteLength: note.length,
       warnings: warnings.length,
     });

@@ -1,7 +1,7 @@
 import { CONFIG } from './config.js';
 import type { ConfigRepo } from './data/configRepo.js';
 import { DEFAULT_CHECKLIST_LABELS } from './text.js';
-import type { ChecklistItem } from './types.js';
+import type { ChecklistItem, MessageTemplate } from './types.js';
 
 /**
  * Effective configuration, resolved from three layers:
@@ -29,6 +29,11 @@ export type AppSettings = {
   showVerifyingModInComment: boolean;
   /** Blank means "use the built-in wording from text.ts". */
   customNoticeText: string;
+  /**
+   * Pre-written notice wordings a moderator can pick from on the verify form.
+   * Empty means the default notice is the only option.
+   */
+  messageTemplates: MessageTemplate[];
   /** Moderator-editable tick-boxes, already parsed and bounded. */
   checklistItems: ChecklistItem[];
   /**
@@ -48,6 +53,16 @@ export type AppSettings = {
   automodReplyText: string;
   /** Show the author's account age and karma on the verify form. */
   showAuthorSummary: boolean;
+
+  /**
+   * Post flair that marks a post as a fundraiser, e.g. "Fundraiser".
+   *
+   * Blank treats every post as a candidate. When set, the bot only replies to
+   * and reports posts carrying this flair, which is the single biggest noise
+   * reduction available on a busy subreddit. Matched case-insensitively, and a
+   * flair containing the text counts (so "Fundraiser" matches "Fundraiser Rs").
+   */
+  fundraiserFlairText: string;
 
   /* --- duplicate link detection --- */
   duplicateDetectionEnabled: boolean;
@@ -85,7 +100,9 @@ export const OVERRIDABLE_KEYS = [
   'addModNote',
   'showVerifyingModInComment',
   'customNoticeText',
+  'messageTemplates',
   'checklistItems',
+  'fundraiserFlairText',
   'compactChecklist',
   'automodReplyEnabled',
   'automodReplyText',
@@ -111,8 +128,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   addModNote: true,
   showVerifyingModInComment: false,
   customNoticeText: '',
+  messageTemplates: [],
   checklistItems: toChecklistItems(DEFAULT_CHECKLIST_LABELS),
   compactChecklist: true,
+  fundraiserFlairText: '',
   automodReplyEnabled: false,
   automodReplyText: '',
   showAuthorSummary: true,
@@ -147,6 +166,19 @@ function coerceBoolean(value: unknown, fallback: boolean): boolean {
 
 function coerceString(value: unknown, fallback: string): string {
   return typeof value === 'string' ? value : fallback;
+}
+
+/**
+ * Reads a value that may come from a `select` field.
+ *
+ * Devvit submits a select as an array of strings even when only one option can
+ * be chosen, so both shapes have to be accepted. The sentinel {@link ANY_FLAIR}
+ * maps back to an empty string, which every caller reads as "no filter".
+ */
+function coerceSelectString(value: unknown, fallback: string): string {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (typeof raw !== 'string') return fallback;
+  return raw === ANY_FLAIR ? '' : raw;
 }
 
 /**
@@ -186,6 +218,75 @@ export function parseChecklistItems(raw: unknown): ChecklistItem[] {
   return labels.length > 0 ? toChecklistItems(labels) : toChecklistItems(DEFAULT_CHECKLIST_LABELS);
 }
 
+/**
+ * Dropdown value meaning "do not filter by flair at all".
+ *
+ * Defined here rather than in the form so the parser and the form cannot drift
+ * apart: a select field submits its value as an array of strings, and this is
+ * the one value that must map back to an empty setting.
+ */
+export const ANY_FLAIR = '__any__';
+
+/** The line that separates one notice template from the next. */
+export const TEMPLATE_SEPARATOR = "---";
+
+/**
+ * Parses the moderator-written notice templates.
+ *
+ * Format: blocks separated by a line containing only `---`. The first non-empty
+ * line of a block is its name (what the moderator picks from the dropdown);
+ * everything after it is the comment body.
+ *
+ * A block with a name but no body is dropped: picking it would post an empty
+ * comment, which is worse than not offering it.
+ */
+export function parseMessageTemplates(raw: unknown): MessageTemplate[] {
+  if (typeof raw !== 'string' || raw.trim().length === 0) return [];
+
+  const blocks: string[][] = [[]];
+  for (const line of raw.split(/\r?\n/u)) {
+    if (line.trim() === TEMPLATE_SEPARATOR) blocks.push([]);
+    else blocks[blocks.length - 1]?.push(line);
+  }
+
+  const templates: MessageTemplate[] = [];
+  for (const block of blocks) {
+    const firstIndex = block.findIndex((line) => line.trim().length > 0);
+    if (firstIndex === -1) continue;
+
+    const label = (block[firstIndex] ?? '').trim().slice(0, CONFIG.templateLabelMaxLength);
+    const body = block.slice(firstIndex + 1).join('\n').trim().slice(0, CONFIG.templateBodyMaxLength);
+    if (label.length === 0 || body.length === 0) continue;
+
+    templates.push({ id: `tpl${templates.length}`, label, body });
+    if (templates.length >= CONFIG.maxMessageTemplates) break;
+  }
+
+  return templates;
+}
+
+/** Renders the templates back to the block form a moderator edits. */
+export function messageTemplatesToText(templates: readonly MessageTemplate[]): string {
+  return templates
+    .map((template) => `${template.label}\n${template.body}`)
+    .join(`\n${TEMPLATE_SEPARATOR}\n`);
+}
+
+/**
+ * Does this post's flair mark it as a fundraiser?
+ *
+ * A blank setting means "every post counts", so the feature is opt-in and the
+ * app never silently ignores posts because of a flair rename.
+ */
+export function matchesFundraiserFlair(
+  flairText: string | null,
+  configured: string,
+): boolean {
+  const wanted = configured.trim().toLowerCase();
+  if (wanted.length === 0) return true;
+  return (flairText ?? '').toLowerCase().includes(wanted);
+}
+
 /** Renders the checklist back to the one-per-line form a moderator edits. */
 export function checklistItemsToText(items: readonly ChecklistItem[]): string {
   return items.map((item) => item.label).join('\n');
@@ -204,7 +305,12 @@ export function parseSettings(raw: Record<string, unknown>): AppSettings {
       DEFAULT_SETTINGS.showVerifyingModInComment,
     ),
     customNoticeText: coerceString(raw['customNoticeText'], DEFAULT_SETTINGS.customNoticeText),
+    messageTemplates: parseMessageTemplates(raw['messageTemplates']),
     checklistItems: parseChecklistItems(raw['checklistItems']),
+    fundraiserFlairText: coerceSelectString(
+      raw['fundraiserFlairText'],
+      DEFAULT_SETTINGS.fundraiserFlairText,
+    ).trim(),
     compactChecklist: coerceBoolean(raw['compactChecklist'], DEFAULT_SETTINGS.compactChecklist),
     automodReplyEnabled: coerceBoolean(
       raw['automodReplyEnabled'],

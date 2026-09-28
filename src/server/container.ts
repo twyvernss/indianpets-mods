@@ -13,6 +13,7 @@ import { createDuplicateService } from './services/duplicates.js';
 import type { IntakeService } from './services/intake.js';
 import { createIntakeService } from './services/intake.js';
 import type { ModeratorGate } from './services/moderator.js';
+import type { RedditPort, SchedulerPort } from './services/redditPort.js';
 import { createModeratorGate } from './services/moderator.js';
 import { createRedditAdapter, createSchedulerAdapter } from './services/redditAdapter.js';
 import type { ReminderService } from './services/reminders.js';
@@ -39,6 +40,8 @@ export type Container = {
   config: ConfigRepo;
   settings: SettingsReader;
   gate: ModeratorGate;
+  reddit: RedditPort;
+  scheduler: SchedulerPort;
   verification: VerificationService;
   duplicates: DuplicateService;
   reminders: ReminderService;
@@ -109,6 +112,8 @@ export function getContainer(): Container {
     config,
     settings,
     gate,
+    reddit,
+    scheduler,
     verification,
     duplicates,
     reminders,

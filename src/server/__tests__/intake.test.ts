@@ -120,7 +120,7 @@ describe('postReply', () => {
 
   it('stays silent on a post a moderator has already approved', async () => {
     const h = harness({}, {
-      post: { id: POST_ID, authorName: 'op_user', isApproved: true, isRemoved: false },
+      post: { id: POST_ID, authorName: 'op_user', isApproved: true, isRemoved: false, flairText: null },
     });
     await h.service.postReply({ postId: POST_ID, author: 'op_user' });
     expect(h.reddit.comments).toHaveLength(0);
@@ -147,6 +147,29 @@ describe('postReply', () => {
   it('still counts as posted when distinguishing fails', async () => {
     const h = harness({}, { failOn: { distinguish: new Error('FORBIDDEN') } });
     await expect(h.service.postReply({ postId: POST_ID, author: 'op_user' })).resolves.toBeUndefined();
+    expect(h.reddit.comments).toHaveLength(1);
+  });
+});
+
+describe('fundraiser flair gating', () => {
+  const flaired = { id: POST_ID, authorName: 'op_user', isApproved: false, isRemoved: true, flairText: 'Fundraiser' };
+  const other = { id: POST_ID, authorName: 'op_user', isApproved: false, isRemoved: true, flairText: 'Discussion' };
+
+  it('replies to a post carrying the fundraiser flair', async () => {
+    const h = harness({ fundraiserFlairText: 'Fundraiser' }, { post: flaired });
+    await h.service.postReply({ postId: POST_ID, author: 'op_user' });
+    expect(h.reddit.comments).toHaveLength(1);
+  });
+
+  it('stays silent on a held post that is not a fundraiser', async () => {
+    const h = harness({ fundraiserFlairText: 'Fundraiser' }, { post: other });
+    await h.service.postReply({ postId: POST_ID, author: 'op_user' });
+    expect(h.reddit.comments).toHaveLength(0);
+  });
+
+  it('replies to everything when no flair is configured', async () => {
+    const h = harness({ fundraiserFlairText: '' }, { post: other });
+    await h.service.postReply({ postId: POST_ID, author: 'op_user' });
     expect(h.reddit.comments).toHaveLength(1);
   });
 });

@@ -6,6 +6,7 @@ import type { Logger } from '../lib/logger.js';
 import { describeError } from '../lib/logger.js';
 import { collectLinks } from '../lib/urls.js';
 import type { SettingsReader } from '../settings.js';
+import { matchesFundraiserFlair } from '../settings.js';
 import { buildAuthorRiskNote, buildDuplicateReportReason } from '../text.js';
 import type { DuplicateFinding, LinkRecord } from '../types.js';
 import type { RedditPort, SchedulerPort } from './redditPort.js';
@@ -212,6 +213,20 @@ export function createDuplicateService(deps: DuplicateDeps): DuplicateService {
     async report(finding): Promise<void> {
       const config = await settings.get();
       if (!config.enabled || !config.duplicateDetectionEnabled) return;
+
+      // Links are indexed for every post, but only fundraisers are worth a
+      // moderator's attention. Checking the flair here rather than on the
+      // trigger keeps the trigger free of Reddit calls.
+      if (config.fundraiserFlairText.length > 0) {
+        const post = await reddit.getPost(finding.postId);
+        if (!post || !matchesFundraiserFlair(post.flairText, config.fundraiserFlairText)) {
+          log.info('duplicate not reported: not flaired as a fundraiser', {
+            postId: finding.postId,
+            flair: post?.flairText ?? 'none',
+          });
+          return;
+        }
+      }
 
       // Saying "the earlier post was already verified" is the single most
       // useful thing a moderator can know here: it usually means the documents

@@ -3,7 +3,17 @@ import { CONFIG } from '../config.js';
 import { sanitizeText, toBoolean, toNonEmptyString } from '../lib/sanitize.js';
 import { daysBetween, formatDisplayDate } from '../lib/time.js';
 import { isTransientError, withRetry } from '../lib/retry.js';
-import { createSettingsReader, DEFAULT_SETTINGS, parseChecklistItems, parseSettings } from '../settings.js';
+import {
+  ANY_FLAIR,
+  createSettingsReader,
+  DEFAULT_SETTINGS,
+  matchesFundraiserFlair,
+  messageTemplatesToText,
+  parseChecklistItems,
+  parseMessageTemplates,
+  parseSettings,
+  TEMPLATE_SEPARATOR,
+} from '../settings.js';
 import { buildModNote, buildVerificationComment } from '../text.js';
 import { fakeLogger, FakeConfigRepo } from './fakes.js';
 
@@ -304,5 +314,80 @@ describe('settings override layer', () => {
 
     const resolved = await createSettingsReader({ getAll: async () => ({}) }, broken).get();
     expect(resolved).toEqual(DEFAULT_SETTINGS);
+  });
+});
+
+describe('parseMessageTemplates', () => {
+  const block = (label: string, body: string): string => `${label}\n${body}`;
+
+  it('returns nothing for blank input', () => {
+    expect(parseMessageTemplates('')).toEqual([]);
+    expect(parseMessageTemplates(undefined)).toEqual([]);
+  });
+
+  it('reads name-then-body blocks separated by the separator line', () => {
+    const raw = [
+      block('Full documents', 'We saw the bill.'),
+      TEMPLATE_SEPARATOR,
+      block('Rescue org', 'Registered rescue.'),
+    ].join('\n');
+
+    expect(parseMessageTemplates(raw)).toEqual([
+      { id: 'tpl0', label: 'Full documents', body: 'We saw the bill.' },
+      { id: 'tpl1', label: 'Rescue org', body: 'Registered rescue.' },
+    ]);
+  });
+
+  it('drops a block with a name but no body, which would post an empty comment', () => {
+    const raw = ['Just a name', TEMPLATE_SEPARATOR, block('Real one', 'Body here.')].join('\n');
+    expect(parseMessageTemplates(raw).map((template) => template.label)).toEqual(['Real one']);
+  });
+
+  it('caps how many templates are accepted', () => {
+    const many = Array.from({ length: 20 }, (_, index) => block(`T${index}`, 'body')).join(
+      `\n${TEMPLATE_SEPARATOR}\n`,
+    );
+    expect(parseMessageTemplates(many)).toHaveLength(CONFIG.maxMessageTemplates);
+  });
+
+  it('round-trips through the editor text', () => {
+    const templates = parseMessageTemplates(block('A', 'body a'));
+    expect(parseMessageTemplates(messageTemplatesToText(templates))).toEqual(templates);
+  });
+});
+
+describe('matchesFundraiserFlair', () => {
+  it('lets everything through when no flair is configured', () => {
+    expect(matchesFundraiserFlair(null, '')).toBe(true);
+    expect(matchesFundraiserFlair('Discussion', '   ')).toBe(true);
+  });
+
+  it('matches case-insensitively and allows extra text around it', () => {
+    expect(matchesFundraiserFlair('Fundraiser', 'fundraiser')).toBe(true);
+    expect(matchesFundraiserFlair('Fundraiser 2026', 'Fundraiser')).toBe(true);
+    expect(matchesFundraiserFlair('Urgent Fundraiser', 'fundraiser')).toBe(true);
+  });
+
+  it('rejects other flairs and unflaired posts', () => {
+    expect(matchesFundraiserFlair('Discussion', 'Fundraiser')).toBe(false);
+    expect(matchesFundraiserFlair(null, 'Fundraiser')).toBe(false);
+  });
+});
+
+describe('flair setting from the dropdown', () => {
+  it('maps the "any post" sentinel back to no filter', () => {
+    expect(parseSettings({ fundraiserFlairText: [ANY_FLAIR] }).fundraiserFlairText).toBe('');
+  });
+
+  it('accepts a select value, which arrives as an array', () => {
+    expect(parseSettings({ fundraiserFlairText: ['Fundraiser'] }).fundraiserFlairText).toBe(
+      'Fundraiser',
+    );
+  });
+
+  it('accepts a plain string, for subreddits with no flairs', () => {
+    expect(parseSettings({ fundraiserFlairText: ' Fundraiser ' }).fundraiserFlairText).toBe(
+      'Fundraiser',
+    );
   });
 });

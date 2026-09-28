@@ -48,6 +48,12 @@ function readChecklistAnswers(body: Record<string, unknown>): Record<string, boo
   return Object.keys(answers).length > 0 ? answers : null;
 }
 
+/** Reads a single-choice `select` value, which Devvit submits as an array. */
+function readSelected(value: unknown): string | null {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return typeof raw === 'string' && raw.length > 0 ? raw : null;
+}
+
 /**
  * The one and only verify form submission.
  *
@@ -64,6 +70,8 @@ forms.post('/verify-submit', async (c) => {
       contextPostId: contextPostId(),
       note: sanitizeText(body.note, CONFIG.noteMaxLength),
       checklistAnswers: readChecklistAnswers(body),
+      // A select submits an array even when only one option is selectable.
+      templateId: readSelected(body['template']),
     });
     return c.json<UiResponse>(toastFor(outcome));
   } catch (error) {

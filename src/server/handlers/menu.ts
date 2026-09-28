@@ -32,6 +32,7 @@ menu.post('/verify-fundraiser', async (c) => {
             authorSummary: outcome.authorSummary,
             items: outcome.items,
             compactChecklist: outcome.compactChecklist,
+            templates: outcome.templates,
           }),
         );
 
@@ -128,7 +129,7 @@ menu.post('/verification-status', async (c) => {
  * without leaving Reddit and without a redeploy.
  */
 menu.post('/settings', async (c) => {
-  const { log, settings, gate } = getContainer();
+  const { log, settings, gate, reddit } = getContainer();
 
   try {
     const username = await gate.actingUsername();
@@ -138,7 +139,8 @@ menu.post('/settings', async (c) => {
       });
     }
 
-    return c.json<UiResponse>(settingsFormResponse(await settings.get()));
+    const [current, flairs] = await Promise.all([settings.get(), reddit.getPostFlairs()]);
+    return c.json<UiResponse>(settingsFormResponse(current, flairs));
   } catch (error) {
     log.error('settings menu action failed', { reason: describeError(error) });
     return c.json<UiResponse>(UNEXPECTED_ERROR);

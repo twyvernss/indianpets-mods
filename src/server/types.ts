@@ -18,6 +18,15 @@ export type ChecklistItem = { id: string; label: string };
 export type ChecklistItemResult = { label: string; checked: boolean };
 
 /**
+ * A pre-written verification notice a moderator can pick at verify time.
+ *
+ * Defined in the subreddit settings, one block per template, so the mod team
+ * can keep two or three wordings (full documents, rescue organisation, partial
+ * paperwork) without editing code.
+ */
+export type MessageTemplate = { id: string; label: string; body: string };
+
+/**
  * `pending` is written BEFORE any Reddit side effect so a crash midway cannot
  * leave the post looking unverified (which would let a second run post a
  * duplicate comment). It is promoted to `complete` once the comment exists, and
@@ -43,6 +52,8 @@ export type VerificationRecord = {
   checklist: ChecklistItemResult[] | null;
   /** The app's stickied verification comment, once it exists. */
   commentId: T1 | null;
+  /** Label of the notice template used, or null for the default wording. */
+  templateLabel: string | null;
   /** Set when the post is later deleted or removed. */
   deletedAtMs: number | null;
 
@@ -69,6 +80,8 @@ export type VerificationToken = {
    * against the wrong answers.
    */
   checklist: ChecklistItem[] | null;
+  /** The notice templates offered on that form, for the same reason. */
+  templates: MessageTemplate[] | null;
 };
 
 /** Discriminated result so handlers can build a precise, honest toast. */

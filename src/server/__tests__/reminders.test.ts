@@ -63,6 +63,7 @@ function harness(
         note: '',
         checklist: null,
         commentId: 't1_x',
+      templateLabel: null,
         deletedAtMs: null,
         reminderSentAtMs: null,
         opRespondedAtMs: null,

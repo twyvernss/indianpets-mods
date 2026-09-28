@@ -6,6 +6,7 @@ import type {
   OnPostSubmitRequest,
 } from '@devvit/web/shared';
 import { Hono } from 'hono';
+import { JOBS } from '../config.js';
 import { getContainer } from '../container.js';
 import { asPostId } from '../data/tokenRepo.js';
 import { describeError } from '../lib/logger.js';
@@ -162,6 +163,30 @@ triggers.post('/post-delete', async (c) => {
     }
   } catch (error) {
     log.error('post-delete trigger failed', { reason: describeError(error) });
+  }
+
+  return c.json({ status: 'ok' });
+});
+
+/**
+ * A new version of the app was installed.
+ *
+ * Kicks off the per-author history backfill, so history added in a later
+ * version still covers fundraisers verified before it existed. Cheap and
+ * idempotent, so running it on every upgrade is fine.
+ */
+triggers.post('/app-upgrade', async (c) => {
+  const { log, scheduler } = getContainer();
+
+  try {
+    await scheduler.runJob({
+      name: JOBS.authorBackfill,
+      data: { offset: 0, batchIndex: 0 },
+      runAt: new Date(Date.now() + 10_000),
+    });
+    log.info('queued author history backfill after upgrade');
+  } catch (error) {
+    log.error('app-upgrade trigger failed', { reason: describeError(error) });
   }
 
   return c.json({ status: 'ok' });
