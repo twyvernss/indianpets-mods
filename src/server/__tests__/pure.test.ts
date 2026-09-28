@@ -12,6 +12,7 @@ import {
   parseChecklistItems,
   parseMessageTemplates,
   parseSettings,
+  sanitiseWikiPageName,
   TEMPLATE_SEPARATOR,
 } from '../settings.js';
 import {
@@ -464,5 +465,29 @@ describe('editable default notice', () => {
       'Registered rescue organisation',
     ]);
     expect(templates[0]?.body).toContain('not a guarantee');
+  });
+});
+
+describe('sanitiseWikiPageName', () => {
+  it('keeps a simple page name', () => {
+    expect(sanitiseWikiPageName('fundraiser-verifications')).toBe('fundraiser-verifications');
+  });
+
+  it('allows nesting under an existing wiki section', () => {
+    expect(sanitiseWikiPageName('spotlight/fundraisers')).toBe('spotlight/fundraisers');
+  });
+
+  it('lowercases and replaces characters Reddit will not accept in a path', () => {
+    expect(sanitiseWikiPageName('Fundraiser Log!')).toBe('fundraiser-log');
+  });
+
+  it('never produces a leading, trailing or doubled separator', () => {
+    expect(sanitiseWikiPageName('/spotlight//logs/')).toBe('spotlight/logs');
+    expect(sanitiseWikiPageName('---')).toBe('fundraiser-verifications');
+  });
+
+  it('falls back rather than writing to the wiki root', () => {
+    expect(sanitiseWikiPageName('')).toBe('fundraiser-verifications');
+    expect(sanitiseWikiPageName('   ')).toBe('fundraiser-verifications');
   });
 });

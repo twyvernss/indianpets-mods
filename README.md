@@ -251,7 +251,8 @@ moderator never waits for it:
 | --- | --- | --- | --- | --- | --- |
 | 28 Sep 2026, 16:43 IST | [t3_abc123](https://reddit.com) | u/op_user | u/mod_one | 2/3: Vet bill is in the OP name; Clinic contact was checked | Documents checked with the clinic |
 
-- Pages rotate monthly (`fundraiser-verifications/2026-09`) so none approaches Reddit's size cap.
+- The page name is a setting and may nest under an existing wiki section, e.g.
+  `spotlight/fundraisers`. Pages rotate monthly (`fundraiser-verifications/2026-09`) so none approaches Reddit's size cap.
 - **Privacy is proven, not assumed.** Reddit's default wiki permission is
   `SUBREDDIT_PERMISSIONS`, which on most subreddits means world-readable. Before every append the
   app creates the page if needed (seeded with a header naming nobody), applies `MODS_ONLY`, and
@@ -425,7 +426,7 @@ npm run test:types
 npm run check
 ```
 
-208 tests across pure logic (sanitisation, dates, retry classification, settings resolution and
+213 tests across pure logic (sanitisation, dates, retry classification, settings resolution and
 clamping, checklist parsing, comment wording, URL normalisation, hashing) and the four services
 against in-memory fakes: idempotency, concurrent runs, expired and mismatched tokens, missing posts,
 deleted authors, v1→v2 record migration, every partial-failure path, duplicate races, link release
@@ -443,5 +444,5 @@ service layer, which is tested; the handlers are exercised during playtest.
 
 ## Test counts
 
-208 unit tests across seven files. Everything below the HTTP handlers is covered; the handlers
+213 unit tests across seven files. Everything below the HTTP handlers is covered; the handlers
 themselves are exercised during playtest.

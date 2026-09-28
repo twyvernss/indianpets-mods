@@ -299,9 +299,16 @@ export function sanitiseWikiPageName(raw: string): string {
   const cleaned = raw
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9_-]+/gu, '-')
-    .replace(/^-+|-+$/gu, '')
-    .slice(0, 60);
+    // Slashes are kept so the log can nest under an existing wiki section,
+    // e.g. "spotlight/fundraisers". Everything else collapses to a hyphen.
+    .replace(/[^a-z0-9_/-]+/gu, '-')
+    // No leading, trailing or doubled separators: those produce wiki paths
+    // Reddit rejects, or worse, a write to the wiki root.
+    .replace(/\/{2,}/gu, '/')
+    .replace(/^[-/]+|[-/]+$/gu, '')
+    .slice(0, 60)
+    .replace(/[-/]+$/gu, '');
+
   return cleaned.length > 0 ? cleaned : 'fundraiser-verifications';
 }
 
