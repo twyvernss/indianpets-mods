@@ -4,6 +4,7 @@ import { CONFIG, JOBS } from '../config.js';
 import { getContainer } from '../container.js';
 import { describeError } from '../lib/logger.js';
 import { asPostId } from '../data/tokenRepo.js';
+import { isVerificationRecord } from '../data/verificationRepo.js';
 import { isDuplicateFinding } from '../services/duplicates.js';
 
 export const jobs = new Hono();
@@ -154,6 +155,32 @@ jobs.post('/author-backfill', async (c) => {
     }
   } catch (error) {
     log.error('author backfill failed', { reason: describeError(error) });
+  }
+
+  return c.json<TaskResponse>({}, 200);
+});
+
+/**
+ * Appends one verification to the durable wiki log.
+ *
+ * Off the verify path because it is a read-modify-write across two Reddit
+ * calls. The record travelled here as JSON, so it is re-validated before use.
+ */
+jobs.post('/audit-log', async (c) => {
+  const { log, audit } = getContainer();
+
+  try {
+    const request = await c.req.json<TaskRequest>();
+    const raw = request.data?.['record'];
+
+    if (!isVerificationRecord(raw)) {
+      log.warn('audit-log job carried an unusable record');
+      return c.json<TaskResponse>({}, 200);
+    }
+
+    await audit.record(raw);
+  } catch (error) {
+    log.error('audit log job failed', { reason: describeError(error) });
   }
 
   return c.json<TaskResponse>({}, 200);

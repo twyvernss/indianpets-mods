@@ -60,6 +60,18 @@ export const CONFIG = {
   maxChecklistItems: 20,
   checklistLabelMaxLength: 120,
 
+  audit: {
+    /**
+     * Reddit caps a wiki page at roughly 512 KB. The log rotates monthly and
+     * starts a new page well before that, so a busy month cannot wedge it.
+     */
+    maxPageBytes: 400_000,
+    /** Serialises the read-modify-write so two verifications cannot clobber. */
+    lockTtlSeconds: 30,
+    /** Delay before the append runs, keeping it off the moderator's action. */
+    delaySeconds: 5,
+  },
+
   /** Guard rails on moderator-written notice templates. */
   maxMessageTemplates: 5,
   templateLabelMaxLength: 60,
@@ -150,6 +162,8 @@ export const JOBS = {
   automodReply: 'automod-reply',
   /** Rebuilds the per-author history from existing verification records. */
   authorBackfill: 'author-backfill',
+  /** Appends one verification to the durable wiki log. */
+  auditLog: 'audit-log',
 } as const;
 
 /**

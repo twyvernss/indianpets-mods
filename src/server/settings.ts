@@ -64,6 +64,19 @@ export type AppSettings = {
    */
   fundraiserFlairText: string;
 
+  /**
+   * Keep a durable, human-readable verification log on a subreddit wiki page.
+   *
+   * On by default, because the app's Redis data is discarded if the app is
+   * ever uninstalled and cannot be read by a human at all. The wiki page
+   * survives that and keeps its own revision history.
+   */
+  wikiLogEnabled: boolean;
+  /** Base page name. Monthly pages are created underneath it. */
+  wikiLogPage: string;
+  /** Also post each verification to Mod Discussions. Off by default: noisy. */
+  modmailLogEnabled: boolean;
+
   /* --- duplicate link detection --- */
   duplicateDetectionEnabled: boolean;
   /** Off by default: scanning every comment is a lot of work for a rare signal. */
@@ -103,6 +116,9 @@ export const OVERRIDABLE_KEYS = [
   'messageTemplates',
   'checklistItems',
   'fundraiserFlairText',
+  'wikiLogEnabled',
+  'wikiLogPage',
+  'modmailLogEnabled',
   'compactChecklist',
   'automodReplyEnabled',
   'automodReplyText',
@@ -136,6 +152,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   checklistItems: toChecklistItems(DEFAULT_CHECKLIST_LABELS),
   compactChecklist: true,
   fundraiserFlairText: '',
+  wikiLogEnabled: true,
+  wikiLogPage: 'fundraiser-verifications',
+  modmailLogEnabled: false,
   automodReplyEnabled: false,
   automodReplyText: '',
   showAuthorSummary: true,
@@ -269,6 +288,23 @@ export function parseMessageTemplates(raw: unknown): MessageTemplate[] {
   return templates;
 }
 
+/**
+ * Reduces a moderator-typed page name to something safe in a wiki path.
+ *
+ * Reddit wiki paths accept lowercase letters, digits, underscores, hyphens and
+ * slashes. Anything else becomes a hyphen, and an empty result falls back to
+ * the default rather than writing to the subreddit wiki root.
+ */
+export function sanitiseWikiPageName(raw: string): string {
+  const cleaned = raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/gu, '-')
+    .replace(/^-+|-+$/gu, '')
+    .slice(0, 60);
+  return cleaned.length > 0 ? cleaned : 'fundraiser-verifications';
+}
+
 /** Renders the templates back to the block form a moderator edits. */
 export function messageTemplatesToText(templates: readonly MessageTemplate[]): string {
   return templates
@@ -322,6 +358,14 @@ export function parseSettings(raw: Record<string, unknown>): AppSettings {
       DEFAULT_SETTINGS.fundraiserFlairText,
     ).trim(),
     compactChecklist: coerceBoolean(raw['compactChecklist'], DEFAULT_SETTINGS.compactChecklist),
+
+    wikiLogEnabled: coerceBoolean(raw['wikiLogEnabled'], DEFAULT_SETTINGS.wikiLogEnabled),
+    // The page name goes straight into a wiki path, so it is reduced to the
+    // characters Reddit allows there rather than trusted as typed.
+    wikiLogPage: sanitiseWikiPageName(
+      coerceString(raw['wikiLogPage'], DEFAULT_SETTINGS.wikiLogPage),
+    ),
+    modmailLogEnabled: coerceBoolean(raw['modmailLogEnabled'], DEFAULT_SETTINGS.modmailLogEnabled),
     automodReplyEnabled: coerceBoolean(
       raw['automodReplyEnabled'],
       DEFAULT_SETTINGS.automodReplyEnabled,

@@ -1,5 +1,5 @@
 import type { T3 } from '@devvit/web/shared';
-import { CONFIG } from '../config.js';
+import { CONFIG, JOBS } from '../config.js';
 import type { TokenRepo } from '../data/tokenRepo.js';
 import { asPostId } from '../data/tokenRepo.js';
 import type { VerificationRepo } from '../data/verificationRepo.js';
@@ -17,7 +17,7 @@ import type {
   VerifyOutcome,
 } from '../types.js';
 import type { ModeratorGate } from './moderator.js';
-import type { RedditPort } from './redditPort.js';
+import type { RedditPort, SchedulerPort } from './redditPort.js';
 
 export type BeginOutcome =
   /**
@@ -50,6 +50,7 @@ export type VerificationDeps = {
   repo: VerificationRepo;
   tokens: TokenRepo;
   reddit: RedditPort;
+  scheduler: SchedulerPort;
   gate: ModeratorGate;
   settings: SettingsReader;
   log: Logger;
@@ -98,7 +99,7 @@ export function formatVerifiedDate(epochMs: number): string {
 }
 
 export function createVerificationService(deps: VerificationDeps): VerificationService {
-  const { repo, tokens, reddit, gate, settings, log, now, newId } = deps;
+  const { repo, tokens, reddit, scheduler, gate, settings, log, now, newId } = deps;
 
   /**
    * A stored record blocks a re-run only when it represents finished work.
@@ -421,10 +422,25 @@ export function createVerificationService(deps: VerificationDeps): VerificationS
       scoped.error('distinguish failed', { commentId: comment.id, reason: describeError(error) });
     }
 
-    await repo.putComplete({
+    const completed = {
       ...completeRecord(record, comment.id),
       templateLabel: template?.label ?? null,
-    });
+    };
+    await repo.putComplete(completed);
+
+    // The durable wiki log is a read-modify-write across two Reddit calls, so
+    // it runs on the scheduler rather than making the moderator wait for it.
+    // A failure here never affects the verification itself.
+    try {
+      await scheduler.runJob({
+        name: JOBS.auditLog,
+        data: { record: { ...completed } },
+        runAt: new Date(now() + CONFIG.audit.delaySeconds * 1000),
+      });
+    } catch (error) {
+      warnings.push('the verification log entry could not be queued');
+      scoped.error('could not queue the audit log entry', { reason: describeError(error) });
+    }
 
     if (appSettings.addModNote && post.authorName) {
       try {

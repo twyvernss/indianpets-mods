@@ -8,6 +8,8 @@ import type { VerificationRepo } from './data/verificationRepo.js';
 import { createVerificationRepo } from './data/verificationRepo.js';
 import type { Logger } from './lib/logger.js';
 import { createLogger } from './lib/logger.js';
+import type { AuditLogService } from './services/auditLog.js';
+import { createAuditLogService } from './services/auditLog.js';
 import type { DuplicateService } from './services/duplicates.js';
 import { createDuplicateService } from './services/duplicates.js';
 import type { IntakeService } from './services/intake.js';
@@ -46,6 +48,7 @@ export type Container = {
   duplicates: DuplicateService;
   reminders: ReminderService;
   intake: IntakeService;
+  audit: AuditLogService;
 };
 
 let instance: Container | null = null;
@@ -79,6 +82,7 @@ export function getContainer(): Container {
     repo,
     tokens,
     reddit,
+    scheduler,
     gate,
     settings,
     log,
@@ -106,6 +110,8 @@ export function getContainer(): Container {
     newId: () => globalThis.crypto.randomUUID(),
   });
 
+  const audit = createAuditLogService({ reddit, redis: redisPort, settings, log, now });
+
   instance = {
     log,
     repo,
@@ -118,6 +124,7 @@ export function getContainer(): Container {
     duplicates,
     reminders,
     intake,
+    audit,
   };
   return instance;
 }

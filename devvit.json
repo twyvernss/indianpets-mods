@@ -74,6 +74,9 @@
       },
       "author-backfill": {
         "endpoint": "/internal/jobs/author-backfill"
+      },
+      "audit-log": {
+        "endpoint": "/internal/jobs/audit-log"
       }
     }
   },
@@ -118,6 +121,21 @@
         "type": "string",
         "label": "Post flair that marks a fundraiser (blank = every post). Easier to set from the in-subreddit settings menu, which lists your actual flairs.",
         "defaultValue": ""
+      },
+      "wikiLogEnabled": {
+        "type": "boolean",
+        "label": "Keep a durable verification log on a subreddit wiki page (survives the app being uninstalled)",
+        "defaultValue": true
+      },
+      "wikiLogPage": {
+        "type": "string",
+        "label": "Wiki page for the verification log. Monthly pages are created underneath it.",
+        "defaultValue": "fundraiser-verifications"
+      },
+      "modmailLogEnabled": {
+        "type": "boolean",
+        "label": "Also post each verification to Mod Discussions",
+        "defaultValue": false
       },
       "automodReplyEnabled": {
         "type": "boolean",

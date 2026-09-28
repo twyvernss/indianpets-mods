@@ -76,6 +76,18 @@ export type RedditPort = {
    * Returns an empty list if the subreddit has none or they cannot be read.
    */
   getPostFlairs(): Promise<{ id: string; text: string }[]>;
+
+  /* --- durable audit log --- */
+
+  /** Current contents of a wiki page, or null if it does not exist yet. */
+  readWikiPage(page: string): Promise<string | null>;
+  /**
+   * Creates or replaces a wiki page. New pages are locked to MODS_ONLY and
+   * unlisted, because the log names the people who asked for money here.
+   */
+  writeWikiPage(page: string, content: string, reason: string): Promise<void>;
+  /** Posts to Mod Discussions. Does not involve or notify any user. */
+  sendModDiscussion(subject: string, bodyMarkdown: string): Promise<void>;
 };
 
 /** The slice of Devvit's scheduler this app uses. */

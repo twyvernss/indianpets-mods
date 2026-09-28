@@ -239,6 +239,31 @@ far smaller but cannot carry partial alpha, so they wreck the edges.
 If you replace it, start from a native 1024x1024 export rather than upscaling, and check the file
 size before uploading.
 
+## The durable log
+
+Redis is the app's working store, not its system of record. An app **upgrade** keeps Redis data, but
+**uninstalling** the app discards it permanently, and no human can read or export it.
+
+So every completed verification is also appended to a subreddit wiki page, on the scheduler so the
+moderator never waits for it:
+
+| Verified (IST) | Post | Fundraiser by | Verified by | Checklist | Notice |
+| --- | --- | --- | --- | --- | --- |
+| 28 Sep 2026, 16:43 IST | [t3_abc123](https://reddit.com) | u/op_user | u/mod_one | 2/3: Vet bill is in the OP name; Clinic contact was checked | Documents checked with the clinic |
+
+- Pages rotate monthly (`fundraiser-verifications/2026-09`) so none approaches Reddit's size cap.
+- New pages are created **MODS_ONLY and unlisted**.
+- The wiki keeps its own revision history, so a bad write is recoverable.
+- Appends are serialised behind a short Redis lock, because it is a read-modify-write.
+- A redelivered job will not write the same post twice.
+
+**The moderator's internal note is never written there.** Wiki pages are readable by anyone unless
+restricted, and notes routinely contain clinic phone numbers and case details. The note stays in the
+app record and in the mod note on the OP. There is a test asserting this.
+
+Optionally (off by default) each verification is also posted to **Mod Discussions**, with the full
+checklist ticked out. That is a notification, not the record - the wiki page is the record.
+
 ## Redis key schema
 
 Devvit's Redis is siloed per subreddit installation and **cannot list or scan keys**, so anything
@@ -394,7 +419,7 @@ npm run test:types
 npm run check
 ```
 
-188 tests across pure logic (sanitisation, dates, retry classification, settings resolution and
+204 tests across pure logic (sanitisation, dates, retry classification, settings resolution and
 clamping, checklist parsing, comment wording, URL normalisation, hashing) and the four services
 against in-memory fakes: idempotency, concurrent runs, expired and mismatched tokens, missing posts,
 deleted authors, v1→v2 record migration, every partial-failure path, duplicate races, link release
@@ -412,5 +437,5 @@ service layer, which is tested; the handlers are exercised during playtest.
 
 ## Test counts
 
-188 unit tests across six files. Everything below the HTTP handlers is covered; the handlers
+204 unit tests across seven files. Everything below the HTTP handlers is covered; the handlers
 themselves are exercised during playtest.

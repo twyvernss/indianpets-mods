@@ -1,4 +1,5 @@
 import { context, reddit, scheduler } from '@devvit/web/server';
+import type { WikiPagePermissionLevel } from '@devvit/web/server';
 import type { T1, T3 } from '@devvit/web/shared';
 import { CONFIG } from '../config.js';
 import type { Logger } from '../lib/logger.js';
@@ -21,6 +22,16 @@ import type {
  * Every call is wrapped in the shared retry helper, which retries transient
  * failures (429/5xx/timeouts) and re-throws everything else immediately.
  */
+/**
+ * `WikiPagePermissionLevel.MODS_ONLY`.
+ *
+ * Devvit re-exports that enum from `@devvit/web/server` with `export type`, so
+ * the runtime value cannot be imported - only the type. The numeric value is
+ * part of Reddit's wiki API (0 = subreddit permissions, 1 = approved
+ * contributors, 2 = mods only) and is stable.
+ */
+const WIKI_MODS_ONLY = 2 as WikiPagePermissionLevel;
+
 export function createRedditAdapter(log: Logger): RedditPort {
   const run = <T>(label: string, operation: () => Promise<T>): Promise<T> =>
     withRetry(operation, CONFIG.retry, log, label);
@@ -130,6 +141,61 @@ export function createRedditAdapter(log: Logger): RedditPort {
         log.warn('author could not be loaded', { username, reason: describeError(error) });
         return null;
       }
+    },
+
+    async readWikiPage(page: string): Promise<string | null> {
+      try {
+        const wiki = await run('getWikiPage', () =>
+          reddit.getWikiPage(context.subredditName, page),
+        );
+        return wiki.content;
+      } catch {
+        // Devvit throws rather than returning null for a page that does not
+        // exist yet, which is the normal first-run case.
+        return null;
+      }
+    },
+
+    async writeWikiPage(page: string, content: string, reason: string): Promise<void> {
+      const existing = await this.readWikiPage(page);
+
+      if (existing === null) {
+        await run('createWikiPage', () =>
+          reddit.createWikiPage({ subredditName: context.subredditName, page, content, reason }),
+        );
+        // A wiki page is readable by anyone unless told otherwise, and this one
+        // names people who asked for money. Lock it down immediately.
+        try {
+          await run('updateWikiPageSettings', () =>
+            reddit.updateWikiPageSettings({
+              subredditName: context.subredditName,
+              page,
+              listed: false,
+              permLevel: WIKI_MODS_ONLY,
+            }),
+          );
+        } catch (error) {
+          log.error('audit log page created but could not be restricted to mods', {
+            page,
+            reason: describeError(error),
+          });
+        }
+        return;
+      }
+
+      await run('updateWikiPage', () =>
+        reddit.updateWikiPage({ subredditName: context.subredditName, page, content, reason }),
+      );
+    },
+
+    async sendModDiscussion(subject: string, bodyMarkdown: string): Promise<void> {
+      await run('modDiscussion', () =>
+        reddit.modMail.createModDiscussionConversation({
+          subject,
+          bodyMarkdown,
+          subredditId: context.subredditId,
+        }),
+      );
     },
 
     async getPostFlairs(): Promise<{ id: string; text: string }[]> {

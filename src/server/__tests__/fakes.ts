@@ -127,7 +127,17 @@ export type FakeRedditOptions = {
   author?: AuthorSnapshot | null;
   flairs?: readonly { id: string; text: string }[];
   failOn?: Partial<
-    Record<'approve' | 'comment' | 'distinguish' | 'modNote' | 'report' | 'lock', Error>
+    Record<
+      | 'approve'
+      | 'comment'
+      | 'distinguish'
+      | 'modNote'
+      | 'report'
+      | 'lock'
+      | 'wiki'
+      | 'modDiscussion',
+      Error
+    >
   >;
 };
 
@@ -223,6 +233,29 @@ export class FakeReddit implements RedditPort {
     this.calls.push('getAuthor');
     if (this.options.author === null) return null;
     return this.options.author ?? { username, accountAgeDays: 400, karma: 5000 };
+  }
+
+  /** In-memory wiki, keyed by page name. */
+  public readonly wiki = new Map<string, string>();
+  public readonly modDiscussions: { subject: string; body: string }[] = [];
+
+  async readWikiPage(page: string): Promise<string | null> {
+    this.calls.push('readWiki');
+    return this.wiki.get(page) ?? null;
+  }
+
+  async writeWikiPage(page: string, content: string): Promise<void> {
+    this.calls.push('writeWiki');
+    const failure = this.options.failOn?.wiki;
+    if (failure) throw failure;
+    this.wiki.set(page, content);
+  }
+
+  async sendModDiscussion(subject: string, bodyMarkdown: string): Promise<void> {
+    this.calls.push('modDiscussion');
+    const failure = this.options.failOn?.modDiscussion;
+    if (failure) throw failure;
+    this.modDiscussions.push({ subject, body: bodyMarkdown });
   }
 
   async getPostFlairs(): Promise<{ id: string; text: string }[]> {

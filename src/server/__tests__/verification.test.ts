@@ -9,7 +9,7 @@ import type { VerificationService } from '../services/verification.js';
 import { createVerificationService } from '../services/verification.js';
 import type { AppSettings } from '../settings.js';
 import type { VerificationRecord } from '../types.js';
-import { fakeLogger, fakeSettings, FakeRedis, FakeReddit } from './fakes.js';
+import { fakeLogger, fakeSettings, FakeRedis, FakeReddit, FakeScheduler } from './fakes.js';
 import type { FakeRedditOptions } from './fakes.js';
 
 const POST_ID = 't3_abc123' as T3;
@@ -21,6 +21,7 @@ type Harness = {
   reddit: FakeReddit;
   repo: ReturnType<typeof createVerificationRepo>;
   tokens: ReturnType<typeof createTokenRepo>;
+  scheduler: FakeScheduler;
   setNow(ms: number): void;
 };
 
@@ -30,6 +31,7 @@ function harness(
 ): Harness {
   const redis = new FakeRedis();
   const reddit = new FakeReddit(redditOptions);
+  const scheduler = new FakeScheduler();
   const log = fakeLogger();
 
   let clock = NOW;
@@ -44,6 +46,7 @@ function harness(
     repo,
     tokens,
     reddit,
+    scheduler,
     gate,
     settings: fakeSettings(settingsOverrides),
     log,
@@ -57,6 +60,7 @@ function harness(
     reddit,
     repo,
     tokens,
+    scheduler,
     setNow(ms: number) {
       clock = ms;
       redis.nowMs = ms;
