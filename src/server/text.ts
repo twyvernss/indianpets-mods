@@ -86,6 +86,35 @@ export function heldByAutomodToast(dateLabel: string): string {
  *  - it explicitly disclaims any guarantee;
  *  - it tells readers to donate at their own discretion.
  */
+/**
+ * The built-in verification notice, as an editable template.
+ *
+ * Defined once, with placeholders rather than interpolated values, so the
+ * settings form can show a moderator EXACTLY what the bot posts and let them
+ * edit it. Saving it unchanged behaves identically to leaving the box blank.
+ *
+ * Wording constraints that must survive any edit:
+ *  - it states what was checked (documents) and nothing more;
+ *  - it explicitly disclaims any guarantee;
+ *  - it tells readers to donate at their own discretion.
+ */
+export const DEFAULT_NOTICE_TEMPLATE = [
+  '## Fundraiser **Approved** by the r/{subreddit} mod team',
+  '',
+  'The moderators of r/{subreddit} have reviewed documents submitted privately by the original poster for this fundraiser, and they were consistent with the fundraiser described here.',
+  '',
+  '**This is not a guarantee.** We cannot audit how donated money is actually spent, we are not involved in this fundraiser, and documents can be forged or circumstances can change after a check is done. Please donate at your own discretion, and only what you can comfortably afford.',
+  '',
+  'If something about this fundraiser looks wrong, report this post or [message the moderators](https://www.reddit.com/message/compose?to=/r/{subreddit}). Please do not accuse people in the comments.',
+].join('\n');
+
+/**
+ * Renders the public verification comment.
+ *
+ * Precedence: the notice the moderator picked at verify time, then the single
+ * custom notice, then the built-in template. All three go through the same
+ * placeholder substitution, so they behave identically.
+ */
 export function buildVerificationComment(input: {
   subredditName: string;
   dateLabel: string;
@@ -96,26 +125,41 @@ export function buildVerificationComment(input: {
 }): string {
   const attribution = input.modName ? `u/${input.modName}` : 'the moderator team';
 
-  if (input.customText.trim().length > 0) {
-    return applyPlaceholders(input.customText, {
-      subreddit: input.subredditName,
-      date: input.dateLabel,
-      mod: attribution,
-    });
-  }
+  // One rendering path for all three sources - picked template, custom notice,
+  // built-in template - so they behave identically and a moderator who saves
+  // the prefilled default changes nothing.
+  const rendered = applyPlaceholders(input.customText.trim() || DEFAULT_NOTICE_TEMPLATE, {
+    subreddit: input.subredditName,
+    date: input.dateLabel,
+    mod: attribution,
+  });
 
+  // The attribution line is appended to ANY wording, so the setting keeps
+  // working after a moderator edits the notice. Skipped when the text already
+  // names them, which happens if they used the {mod} placeholder themselves.
+  if (input.modName && !rendered.includes(`u/${input.modName}`)) {
+    return `${rendered}\n\n*Verified by u/${input.modName}.*`;
+  }
+  return rendered;
+}
+
+/**
+ * A starting point for the saved-notices box.
+ *
+ * Shown when a subreddit has no templates yet, so the block format is obvious
+ * and the first notice is the wording already in use rather than a blank page.
+ */
+export function starterTemplates(): string {
   return [
-    `## Fundraiser **Approved** by the r/${input.subredditName} mod team`,
+    'Verified with full documents',
+    DEFAULT_NOTICE_TEMPLATE,
+    '---',
+    'Verified for a registered rescue',
+    '## Fundraiser **Approved** by the r/{subreddit} mod team',
     '',
-    `The moderators of r/${input.subredditName} have reviewed documents submitted privately by the original poster for this fundraiser, and they were consistent with the fundraiser described here.`,
+    'This fundraiser is run by a rescue organisation known to the r/{subreddit} mod team, and we have seen documentation for the animals involved.',
     '',
-    '**This is not a guarantee.** We cannot audit how donated money is actually spent, we are not involved in this fundraiser, and documents can be forged or circumstances can change after a check is done. Please donate at your own discretion, and only what you can comfortably afford.',
-    '',
-    `If something about this fundraiser looks wrong, report this post or [message the moderators](https://www.reddit.com/message/compose?to=/r/${input.subredditName}). Please do not accuse people in the comments.`,
-    // Only rendered when the subreddit has explicitly opted in to naming the
-    // moderator. The default keeps the check anonymous, which is the whole
-    // reason this app exists.
-    ...(input.modName ? ['', `*Verified by u/${input.modName}.*`] : []),
+    '**This is not a guarantee.** We cannot audit how donated money is actually spent. Please donate at your own discretion, and only what you can comfortably afford.',
   ].join('\n');
 }
 

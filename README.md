@@ -203,7 +203,7 @@ Layer 1 wins over layer 2, which wins over the built-in defaults.
 | Add a mod note on the OP | on | Records who verified and when. Skipped if the poster's account is deleted. |
 | Name the verifying moderator in the public comment | **off** | Leave this off. Turning it on puts a moderator's username on the post, which is exactly what causes the unsolicited DMs this app exists to prevent. |
 | Which flair marks a fundraiser | none (every post) | A dropdown of the subreddit's real post flairs. When set, the bot only replies to and reports posts with that flair. Falls back to a text box on a subreddit with no flairs. |
-| Saved notices | none | Two or three pre-written verification notices a moderator picks from at verify time. One per block, separated by a line containing only `---`; the first line of each block is its name. |
+| Saved notices | two starter blocks | Two or three pre-written verification notices a moderator picks from at verify time. One per block, separated by a line containing only `---`; the first line of each block is its name. |
 | Checklist items | built-in list | One item per line. Markdown bullets are tolerated. Max 20 items, 120 characters each. |
 | Compact checklist | on | One multi-select tick-list instead of a row of toggles. Keeps the form short, which matters on mobile. |
 | Custom verification notice | blank | Replaces the built-in comment. Supports `{subreddit}`, `{date}`, `{mod}`. Keep the "not a guarantee" and "donate at your own discretion" language. |
@@ -298,6 +298,17 @@ checklist** off if you prefer a row of toggles.
 scroll, and an app cannot pin them. The only lever is form length, which is exactly why the compact
 checklist is the default.
 
+### Editing what the bot posts
+
+The built-in notice lives in `text.ts` as `DEFAULT_NOTICE_TEMPLATE`, written with `{subreddit}`
+placeholders rather than interpolated values. The settings form **prefills the notice box with that
+exact text**, so a moderator can see what is actually being posted and edit it in place. Saving it
+unchanged renders identically to leaving it blank; clearing the box returns to the built-in wording.
+
+The moderator attribution line is appended to *any* wording when the setting is on, so editing the
+notice does not silently disable that setting. If the text already uses `{mod}`, the line is not
+added twice.
+
 ### Picking a notice at verify time
 
 The mod team can save two or three wordings (full documents, registered rescue, partial paperwork)
@@ -376,7 +387,7 @@ npm run test:types
 npm run check
 ```
 
-181 tests across pure logic (sanitisation, dates, retry classification, settings resolution and
+186 tests across pure logic (sanitisation, dates, retry classification, settings resolution and
 clamping, checklist parsing, comment wording, URL normalisation, hashing) and the four services
 against in-memory fakes: idempotency, concurrent runs, expired and mismatched tokens, missing posts,
 deleted authors, v1→v2 record migration, every partial-failure path, duplicate races, link release
@@ -394,5 +405,5 @@ service layer, which is tested; the handlers are exercised during playtest.
 
 ## Test counts
 
-181 unit tests across six files. Everything below the HTTP handlers is covered; the handlers
+186 unit tests across six files. Everything below the HTTP handlers is covered; the handlers
 themselves are exercised during playtest.

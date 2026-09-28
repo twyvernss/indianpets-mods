@@ -7,7 +7,7 @@ import {
   messageTemplatesToText,
   TEMPLATE_SEPARATOR,
 } from './settings.js';
-import { FORM_TEXT } from './text.js';
+import { DEFAULT_NOTICE_TEMPLATE, FORM_TEXT, starterTemplates } from './text.js';
 import type { ChecklistItem, MessageTemplate } from './types.js';
 
 /**
@@ -226,19 +226,27 @@ export function settingsFormResponse(
               {
                 type: 'paragraph',
                 name: 'messageTemplates',
-                label: 'Saved notices a moderator can pick from',
+                label: 'Saved notices a moderator can pick from (shown as a dropdown when verifying)',
                 helpText: `One per block, separated by a line containing only ${TEMPLATE_SEPARATOR}. The first line of each block is its name in the dropdown, the rest is the comment. Placeholders: {subreddit}, {date}, {mod}. Maximum ${CONFIG.maxMessageTemplates}.`,
                 lineHeight: 8,
-                defaultValue: messageTemplatesToText(current.messageTemplates),
+                // Prefilled with the wording already in use when there are
+                // none yet, so the format is obvious and the first notice is
+                // real text rather than a blank page.
+                defaultValue:
+                  current.messageTemplates.length > 0
+                    ? messageTemplatesToText(current.messageTemplates)
+                    : starterTemplates(),
               },
               {
                 type: 'paragraph',
                 name: 'customNoticeText',
-                label: 'Custom verification notice',
+                label: 'The notice the bot posts (used when no saved notice is picked)',
                 helpText:
-                  'Blank uses the built-in wording. Placeholders: {subreddit}, {date}, {mod}. Keep the "not a guarantee" and "donate at your own discretion" language.',
-                lineHeight: 5,
-                defaultValue: current.customNoticeText,
+                  'This is the exact wording currently being posted. Edit it freely, or clear the box to go back to the built-in text. Placeholders: {subreddit}, {date}, {mod}. Keep the "not a guarantee" and "donate at your own discretion" language.',
+                lineHeight: 10,
+                // Shows the real wording instead of an empty box, so a
+                // moderator can see what is being posted before changing it.
+                defaultValue: current.customNoticeText || DEFAULT_NOTICE_TEMPLATE,
               },
               {
                 type: 'boolean',

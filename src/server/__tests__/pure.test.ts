@@ -14,7 +14,12 @@ import {
   parseSettings,
   TEMPLATE_SEPARATOR,
 } from '../settings.js';
-import { buildModNote, buildVerificationComment } from '../text.js';
+import {
+  buildModNote,
+  buildVerificationComment,
+  DEFAULT_NOTICE_TEMPLATE,
+  starterTemplates,
+} from '../text.js';
 import { fakeLogger, FakeConfigRepo } from './fakes.js';
 
 describe('sanitizeText', () => {
@@ -389,5 +394,56 @@ describe('flair setting from the dropdown', () => {
     expect(parseSettings({ fundraiserFlairText: ' Fundraiser ' }).fundraiserFlairText).toBe(
       'Fundraiser',
     );
+  });
+});
+
+describe('editable default notice', () => {
+  const base = { subredditName: 'IndianPets', dateLabel: '28 Sep 2026, 14:05 IST' };
+
+  it('renders the same text whether the box is blank or holds the default template', () => {
+    const blank = buildVerificationComment({ ...base, modName: null, customText: '' });
+    const prefilled = buildVerificationComment({
+      ...base,
+      modName: null,
+      customText: DEFAULT_NOTICE_TEMPLATE,
+    });
+    expect(prefilled).toBe(blank);
+  });
+
+  it('substitutes placeholders in an edited notice', () => {
+    const comment = buildVerificationComment({
+      ...base,
+      modName: null,
+      customText: 'Checked for r/{subreddit} on {date}.',
+    });
+    expect(comment).toBe('Checked for r/IndianPets on 28 Sep 2026, 14:05 IST.');
+  });
+
+  it('still adds the moderator attribution to an edited notice', () => {
+    const comment = buildVerificationComment({
+      ...base,
+      modName: 'mod_one',
+      customText: 'Short custom notice.',
+    });
+    expect(comment).toContain('Short custom notice.');
+    expect(comment).toContain('Verified by u/mod_one');
+  });
+
+  it('does not name the moderator twice when the notice already uses {mod}', () => {
+    const comment = buildVerificationComment({
+      ...base,
+      modName: 'mod_one',
+      customText: 'Checked by {mod}.',
+    });
+    expect(comment.match(/mod_one/gu)).toHaveLength(1);
+  });
+
+  it('offers starter notices that parse into two titled blocks', () => {
+    const templates = parseMessageTemplates(starterTemplates());
+    expect(templates.map((template) => template.label)).toEqual([
+      'Verified with full documents',
+      'Verified for a registered rescue',
+    ]);
+    expect(templates[0]?.body).toContain('not a guarantee');
   });
 });
