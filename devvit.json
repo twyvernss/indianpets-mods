@@ -18,21 +18,27 @@
         "label": "Verify fundraiser",
         "description": "Approve this fundraiser and post the r/IndianPets mod team verification notice.",
         "forUserType": "moderator",
-        "location": ["post"],
+        "location": [
+          "post"
+        ],
         "endpoint": "/internal/menu/verify-fundraiser"
       },
       {
         "label": "Fundraiser verification status",
         "description": "Show who verified this fundraiser and when.",
         "forUserType": "moderator",
-        "location": ["post"],
+        "location": [
+          "post"
+        ],
         "endpoint": "/internal/menu/verification-status"
       },
       {
         "label": "Fundraiser tools settings",
         "description": "Turn features on or off and edit the wording, without leaving Reddit.",
         "forUserType": "moderator",
-        "location": ["subreddit"],
+        "location": [
+          "subreddit"
+        ],
         "endpoint": "/internal/menu/settings"
       }
     ]
@@ -144,5 +150,8 @@
   "scripts": {
     "dev": "npm run watch",
     "build": "npm run build"
+  },
+  "dev": {
+    "subreddit": "indianpets_mods_dev"
   }
 }

@@ -1,10 +1,12 @@
 {
   "private": true,
   "name": "indianpets-mods",
-  "version": "1.0.0",
+  "version": "0.0.0",
   "license": "BSD-3-Clause",
   "type": "module",
-  "engines": { "node": ">=24.0.0" },
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "scripts": {
     "build": "esbuild --bundle --log-level=warning --sourcemap=linked --target=es2023 --format=cjs --platform=node --outfile=dist/server/index.cjs src/server/index.ts",
     "watch": "npm run build -- --watch=forever",
