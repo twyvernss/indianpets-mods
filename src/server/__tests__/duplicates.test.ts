@@ -1,0 +1,250 @@
+import type { T3 } from '@devvit/web/shared';
+import { describe, expect, it } from 'vitest';
+import { JOBS } from '../config.js';
+import { createLinkRepo } from '../data/linkRepo.js';
+import type { DuplicateService } from '../services/duplicates.js';
+import { createDuplicateService, isDuplicateFinding } from '../services/duplicates.js';
+import type { AppSettings } from '../settings.js';
+import { fakeLogger, fakeSettings, FakeRedis, FakeReddit, FakeScheduler } from './fakes.js';
+import type { FakeRedditOptions } from './fakes.js';
+
+const NOW = 1_700_000_000_000;
+const KETTO = 'https://ketto.org/fundraiser/save-bruno';
+
+type Harness = {
+  service: DuplicateService;
+  redis: FakeRedis;
+  reddit: FakeReddit;
+  scheduler: FakeScheduler;
+};
+
+function harness(
+  settingsOverrides: Partial<AppSettings> = {},
+  redditOptions: FakeRedditOptions = {},
+): Harness {
+  const redis = new FakeRedis();
+  redis.nowMs = NOW;
+  const reddit = new FakeReddit(redditOptions);
+  const scheduler = new FakeScheduler();
+
+  const service = createDuplicateService({
+    links: createLinkRepo(redis),
+    reddit,
+    scheduler,
+    settings: fakeSettings(settingsOverrides),
+    log: fakeLogger(),
+    now: () => NOW,
+  });
+
+  return { service, redis, reddit, scheduler };
+}
+
+function post(postId: string, author: string | null, body: string) {
+  return { postId: postId as T3, author, title: '', body, url: '' };
+}
+
+describe('inspectPost', () => {
+  it('records a first sighting without reporting anything', async () => {
+    const h = harness();
+    const finding = await h.service.inspectPost(post('t3_first', 'alice', KETTO));
+
+    expect(finding).toBeNull();
+    expect(h.scheduler.jobs).toHaveLength(0);
+  });
+
+  it('flags a second post carrying the same campaign from a different author', async () => {
+    const h = harness();
+    await h.service.inspectPost(post('t3_first', 'alice', KETTO));
+
+    const finding = await h.service.inspectPost(
+      post('t3_second', 'bob', 'mirror: https://www.ketto.org/fundraiser/save-bruno?utm_source=x'),
+    );
+
+    expect(finding).toMatchObject({
+      postId: 't3_second',
+      originalPostId: 't3_first',
+      originalAuthor: 'alice',
+      sameAuthor: false,
+    });
+    expect(h.scheduler.jobsNamed(JOBS.duplicateReport)).toHaveLength(1);
+  });
+
+  it('marks a repost by the same author as such', async () => {
+    const h = harness();
+    await h.service.inspectPost(post('t3_first', 'alice', KETTO));
+    const finding = await h.service.inspectPost(post('t3_second', 'Alice', KETTO));
+
+    expect(finding?.sameAuthor).toBe(true);
+  });
+
+  it('stays quiet about same-author reposts when configured to', async () => {
+    const h = harness({ reportSameAuthorReposts: false });
+    await h.service.inspectPost(post('t3_first', 'alice', KETTO));
+
+    expect(await h.service.inspectPost(post('t3_second', 'alice', KETTO))).toBeNull();
+    expect(h.scheduler.jobs).toHaveLength(0);
+  });
+
+  it('reports one finding per post, not one per repeated URL shape', async () => {
+    const h = harness();
+    await h.service.inspectPost(post('t3_first', 'alice', KETTO));
+    await h.service.inspectPost(post('t3_other', 'alice', 'https://milaap.org/fundraisers/bruno'));
+
+    const finding = await h.service.inspectPost(
+      post('t3_second', 'bob', `${KETTO} and https://milaap.org/fundraisers/bruno`),
+    );
+
+    expect(finding).not.toBeNull();
+    expect(h.scheduler.jobsNamed(JOBS.duplicateReport)).toHaveLength(1);
+  });
+
+  it('is idempotent when the trigger is redelivered', async () => {
+    const h = harness();
+    await h.service.inspectPost(post('t3_first', 'alice', KETTO));
+
+    const first = await h.service.inspectPost(post('t3_second', 'bob', KETTO));
+    const second = await h.service.inspectPost(post('t3_second', 'bob', KETTO));
+
+    expect(first).not.toBeNull();
+    expect(second).toBeNull();
+    expect(h.scheduler.jobsNamed(JOBS.duplicateReport)).toHaveLength(1);
+  });
+
+  it('does not flag a post against itself on redelivery', async () => {
+    const h = harness();
+    await h.service.inspectPost(post('t3_first', 'alice', KETTO));
+    expect(await h.service.inspectPost(post('t3_first', 'alice', KETTO))).toBeNull();
+  });
+
+  it('does nothing when the feature or the app is switched off', async () => {
+    const off = harness({ duplicateDetectionEnabled: false });
+    await off.service.inspectPost(post('t3_first', 'alice', KETTO));
+    expect(await off.service.inspectPost(post('t3_second', 'bob', KETTO))).toBeNull();
+
+    const disabled = harness({ enabled: false });
+    expect(await disabled.service.inspectPost(post('t3_a', 'alice', KETTO))).toBeNull();
+  });
+
+  it('makes no Reddit calls at all - reporting is the scheduler’s job', async () => {
+    const h = harness();
+    await h.service.inspectPost(post('t3_first', 'alice', KETTO));
+    await h.service.inspectPost(post('t3_second', 'bob', KETTO));
+    expect(h.reddit.calls).toEqual([]);
+  });
+
+  it('reads every link in a post with one batched call', async () => {
+    const h = harness();
+    h.redis.mGetCalls = 0;
+    await h.service.inspectPost(
+      post('t3_first', 'alice', `${KETTO} https://milaap.org/fundraisers/x https://give.do/fundraisers/y`),
+    );
+    expect(h.redis.mGetCalls).toBe(1);
+  });
+});
+
+describe('report', () => {
+  it('sends the post to the modqueue and never removes it', async () => {
+    const h = harness();
+    await h.service.inspectPost(post('t3_first', 'alice', KETTO));
+    const finding = await h.service.inspectPost(post('t3_second', 'bob', KETTO));
+    if (!finding) throw new Error('expected a finding');
+
+    await h.service.report(finding);
+
+    expect(h.reddit.reports).toHaveLength(1);
+    expect(h.reddit.reports[0]?.postId).toBe('t3_second');
+    expect(h.reddit.reports[0]?.reason).toContain('t3_first');
+    expect(h.reddit.reports[0]?.reason).toContain('u/alice');
+  });
+
+  it('uses quieter wording for a same-author repost', async () => {
+    const h = harness();
+    await h.service.inspectPost(post('t3_first', 'alice', KETTO));
+    const finding = await h.service.inspectPost(post('t3_second', 'alice', KETTO));
+    if (!finding) throw new Error('expected a finding');
+
+    await h.service.report(finding);
+    expect(h.reddit.reports[0]?.reason).toContain('Repost');
+  });
+
+  it('skips the author lookup entirely when no thresholds are set', async () => {
+    const h = harness();
+    await h.service.inspectPost(post('t3_first', 'alice', KETTO));
+    const finding = await h.service.inspectPost(post('t3_second', 'bob', KETTO));
+    if (!finding) throw new Error('expected a finding');
+
+    await h.service.report(finding);
+    expect(h.reddit.calls).not.toContain('getAuthor');
+  });
+
+  it('annotates the report when the author is below a configured threshold', async () => {
+    const h = harness(
+      { minAccountAgeDays: 30, minKarma: 100 },
+      { author: { username: 'bob', accountAgeDays: 3, karma: 12 } },
+    );
+    await h.service.inspectPost(post('t3_first', 'alice', KETTO));
+    const finding = await h.service.inspectPost(post('t3_second', 'bob', KETTO));
+    if (!finding) throw new Error('expected a finding');
+
+    await h.service.report(finding);
+    expect(h.reddit.reports[0]?.reason).toContain('new account');
+  });
+
+  it('leaves the reason alone for an established author', async () => {
+    const h = harness(
+      { minAccountAgeDays: 30, minKarma: 100 },
+      { author: { username: 'bob', accountAgeDays: 900, karma: 8000 } },
+    );
+    await h.service.inspectPost(post('t3_first', 'alice', KETTO));
+    const finding = await h.service.inspectPost(post('t3_second', 'bob', KETTO));
+    if (!finding) throw new Error('expected a finding');
+
+    await h.service.report(finding);
+    expect(h.reddit.reports[0]?.reason).not.toContain('new account');
+  });
+});
+
+describe('forgetPost', () => {
+  it('releases the links a deleted post owned, so a new post may claim them', async () => {
+    const h = harness();
+    await h.service.inspectPost(post('t3_first', 'alice', KETTO));
+    await h.service.forgetPost('t3_first' as T3);
+
+    // With ownership released, the next post is a first sighting again.
+    expect(await h.service.inspectPost(post('t3_second', 'bob', KETTO))).toBeNull();
+  });
+
+  it('does not release a link another post has since claimed', async () => {
+    const h = harness();
+    await h.service.inspectPost(post('t3_first', 'alice', KETTO));
+    await h.service.inspectPost(post('t3_second', 'bob', KETTO));
+
+    // t3_second never owned the link, so forgetting it must change nothing.
+    await h.service.forgetPost('t3_second' as T3);
+    expect(await h.service.inspectPost(post('t3_third', 'carol', KETTO))).not.toBeNull();
+  });
+
+  it('tolerates a post it has never seen', async () => {
+    const h = harness();
+    await expect(h.service.forgetPost('t3_unknown' as T3)).resolves.toBeUndefined();
+  });
+});
+
+describe('isDuplicateFinding', () => {
+  it('accepts a well-formed payload and rejects anything else', () => {
+    const valid = {
+      postId: 't3_a',
+      author: 'bob',
+      originalPostId: 't3_b',
+      originalAuthor: null,
+      display: 'ketto.org/fundraiser/x',
+      shortened: false,
+      sameAuthor: false,
+    };
+    expect(isDuplicateFinding(valid)).toBe(true);
+    expect(isDuplicateFinding({ ...valid, postId: 'not-a-post' })).toBe(false);
+    expect(isDuplicateFinding({ ...valid, sameAuthor: 'yes' })).toBe(false);
+    expect(isDuplicateFinding(null)).toBe(false);
+    expect(isDuplicateFinding('t3_a')).toBe(false);
+  });
+});

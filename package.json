@@ -1,0 +1,33 @@
+{
+  "private": true,
+  "name": "indianpets-mods",
+  "version": "1.0.0",
+  "license": "BSD-3-Clause",
+  "type": "module",
+  "engines": { "node": ">=24.0.0" },
+  "scripts": {
+    "build": "esbuild --bundle --log-level=warning --sourcemap=linked --target=es2023 --format=cjs --platform=node --outfile=dist/server/index.cjs src/server/index.ts",
+    "watch": "npm run build -- --watch=forever",
+    "clean": "rm -rf dist",
+    "login": "devvit login",
+    "dev": "devvit playtest",
+    "upload": "npm run build && devvit upload",
+    "release": "npm run check && devvit publish",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:types": "tsc --noEmit",
+    "check": "npm run test:types && npm run test && npm run build"
+  },
+  "dependencies": {
+    "@devvit/web": "0.14.5",
+    "@hono/node-server": "2.1.1",
+    "hono": "4.13.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "devvit": "0.14.5",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.0"
+  }
+}

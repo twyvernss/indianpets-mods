@@ -1,0 +1,148 @@
+{
+  "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
+  "name": "indianpets-mods",
+  "server": {
+    "dir": "dist/server",
+    "entry": "index.cjs"
+  },
+  "permissions": {
+    "redis": true,
+    "reddit": {
+      "enable": true,
+      "scope": "moderator"
+    }
+  },
+  "menu": {
+    "items": [
+      {
+        "label": "Verify fundraiser",
+        "description": "Approve this fundraiser and post the r/IndianPets mod team verification notice.",
+        "forUserType": "moderator",
+        "location": ["post"],
+        "endpoint": "/internal/menu/verify-fundraiser"
+      },
+      {
+        "label": "Fundraiser verification status",
+        "description": "Show who verified this fundraiser and when.",
+        "forUserType": "moderator",
+        "location": ["post"],
+        "endpoint": "/internal/menu/verification-status"
+      },
+      {
+        "label": "Fundraiser tools settings",
+        "description": "Turn features on or off and edit the wording, without leaving Reddit.",
+        "forUserType": "moderator",
+        "location": ["subreddit"],
+        "endpoint": "/internal/menu/settings"
+      }
+    ]
+  },
+  "forms": {
+    "verifyForm": "/internal/form/verify-submit",
+    "checklistForm": "/internal/form/checklist-submit",
+    "settingsForm": "/internal/form/settings-submit"
+  },
+  "triggers": {
+    "onAutomoderatorFilterPost": "/internal/triggers/automod-filter-post",
+    "onPostSubmit": "/internal/triggers/post-submit",
+    "onCommentCreate": "/internal/triggers/comment-create",
+    "onPostDelete": "/internal/triggers/post-delete"
+  },
+  "scheduler": {
+    "tasks": {
+      "stale-sweep": {
+        "endpoint": "/internal/jobs/stale-sweep",
+        "cron": "0 3 * * *"
+      },
+      "stale-sweep-batch": {
+        "endpoint": "/internal/jobs/stale-sweep-batch"
+      },
+      "duplicate-report": {
+        "endpoint": "/internal/jobs/duplicate-report"
+      }
+    }
+  },
+  "settings": {
+    "subreddit": {
+      "enabled": {
+        "type": "boolean",
+        "label": "App enabled (master switch)",
+        "defaultValue": true
+      },
+      "addModNote": {
+        "type": "boolean",
+        "label": "Add a mod note on the OP when a fundraiser is verified",
+        "defaultValue": true
+      },
+      "showVerifyingModInComment": {
+        "type": "boolean",
+        "label": "Name the verifying moderator in the public comment (not recommended - mods then receive unsolicited DMs)",
+        "defaultValue": false
+      },
+      "customNoticeText": {
+        "type": "paragraph",
+        "label": "Custom verification notice. Blank uses the built-in wording. Placeholders: {subreddit}, {date}, {mod}",
+        "defaultValue": ""
+      },
+      "checklistItems": {
+        "type": "paragraph",
+        "label": "Verification checklist items, one per line. Blank uses the built-in list.",
+        "defaultValue": ""
+      },
+      "duplicateDetectionEnabled": {
+        "type": "boolean",
+        "label": "Detect repeated fundraiser links and report them to the modqueue",
+        "defaultValue": true
+      },
+      "reportSameAuthorReposts": {
+        "type": "boolean",
+        "label": "Also report when the same person reposts their own fundraiser link",
+        "defaultValue": true
+      },
+      "scanCommentsForLinks": {
+        "type": "boolean",
+        "label": "Also scan comments for fundraiser links (much more traffic)",
+        "defaultValue": false
+      },
+      "staleRemindersEnabled": {
+        "type": "boolean",
+        "label": "Ask the OP for an update on old verified fundraisers",
+        "defaultValue": true
+      },
+      "reminderDays": {
+        "type": "number",
+        "label": "Days after verification before asking the OP for an update",
+        "defaultValue": 30
+      },
+      "graceDays": {
+        "type": "number",
+        "label": "Days to wait for a reply before reporting the post to the modqueue",
+        "defaultValue": 7
+      },
+      "lockStalePosts": {
+        "type": "boolean",
+        "label": "Also lock a stale fundraiser when reporting it",
+        "defaultValue": false
+      },
+      "customReminderText": {
+        "type": "paragraph",
+        "label": "Custom reminder wording. Blank uses the built-in wording. Placeholders: {subreddit}, {op}, {days}, {grace}",
+        "defaultValue": ""
+      },
+      "minAccountAgeDays": {
+        "type": "number",
+        "label": "Minimum account age in days (0 disables). Only annotates modqueue reports.",
+        "defaultValue": 0
+      },
+      "minKarma": {
+        "type": "number",
+        "label": "Minimum combined karma (0 disables). Only annotates modqueue reports.",
+        "defaultValue": 0
+      }
+    }
+  },
+  "scripts": {
+    "dev": "npm run watch",
+    "build": "npm run build"
+  }
+}
