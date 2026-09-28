@@ -224,6 +224,19 @@ shown at the time, not just the answers.
 
 ---
 
+## App icon
+
+`assets/icon.png`, wired up via `marketingAssets.icon` in `devvit.json`.
+
+Devvit requires it to be **1024x1024 and at most 500 KB**, which is a tighter pair of constraints
+than it looks: a 32-bit PNG of a smoothly upscaled logo lands around 1 MB. The current icon is a 4x
+nearest-neighbour scale of the 256x256 source, which keeps the exact colours and the partial
+transparency on the antialiased edges and comes in at ~119 KB. Palette-reduced (8-bit) versions are
+far smaller but cannot carry partial alpha, so they wreck the edges.
+
+If you replace it, start from a native 1024x1024 export rather than upscaling, and check the file
+size before uploading.
+
 ## Redis key schema
 
 Devvit's Redis is siloed per subreddit installation and **cannot list or scan keys**, so anything
