@@ -2,6 +2,7 @@ import type { T3 } from '@devvit/web/shared';
 import { describe, expect, it } from 'vitest';
 import { JOBS } from '../config.js';
 import { createLinkRepo } from '../data/linkRepo.js';
+import { createVerificationRepo } from '../data/verificationRepo.js';
 import type { DuplicateService } from '../services/duplicates.js';
 import { createDuplicateService, isDuplicateFinding } from '../services/duplicates.js';
 import type { AppSettings } from '../settings.js';
@@ -16,6 +17,8 @@ type Harness = {
   redis: FakeRedis;
   reddit: FakeReddit;
   scheduler: FakeScheduler;
+  records: ReturnType<typeof createVerificationRepo>;
+  setNow(ms: number): void;
 };
 
 function harness(
@@ -26,17 +29,29 @@ function harness(
   redis.nowMs = NOW;
   const reddit = new FakeReddit(redditOptions);
   const scheduler = new FakeScheduler();
+  let clock = NOW;
 
   const service = createDuplicateService({
     links: createLinkRepo(redis),
+    records: createVerificationRepo(redis),
     reddit,
     scheduler,
     settings: fakeSettings(settingsOverrides),
     log: fakeLogger(),
-    now: () => NOW,
+    now: () => clock,
   });
 
-  return { service, redis, reddit, scheduler };
+  return {
+    service,
+    redis,
+    reddit,
+    scheduler,
+    records: createVerificationRepo(redis),
+    setNow(ms) {
+      clock = ms;
+      redis.nowMs = ms;
+    },
+  };
 }
 
 function post(postId: string, author: string | null, body: string) {
@@ -240,11 +255,124 @@ describe('isDuplicateFinding', () => {
       display: 'ketto.org/fundraiser/x',
       shortened: false,
       sameAuthor: false,
+      hoursSincePrevious: 5,
+      tooSoon: false,
     };
     expect(isDuplicateFinding(valid)).toBe(true);
     expect(isDuplicateFinding({ ...valid, postId: 'not-a-post' })).toBe(false);
     expect(isDuplicateFinding({ ...valid, sameAuthor: 'yes' })).toBe(false);
+    expect(isDuplicateFinding({ ...valid, hoursSincePrevious: '5' })).toBe(false);
+    expect(isDuplicateFinding({ ...valid, tooSoon: undefined })).toBe(false);
     expect(isDuplicateFinding(null)).toBe(false);
     expect(isDuplicateFinding('t3_a')).toBe(false);
+  });
+});
+
+const HOUR = 3_600_000;
+
+describe('legitimate reposts', () => {
+  it('does NOT report a same-author repost that waited out the window', async () => {
+    const h = harness({ sameAuthorRepostHours: 24 });
+    await h.service.inspectPost(post('t3_first', 'alice', KETTO));
+
+    h.setNow(NOW + 25 * HOUR);
+    const finding = await h.service.inspectPost(post('t3_second', 'alice', KETTO));
+
+    expect(finding).toBeNull();
+    expect(h.scheduler.jobs).toHaveLength(0);
+  });
+
+  it('does report a same-author repost that came too soon, with the numbers', async () => {
+    const h = harness({ sameAuthorRepostHours: 24 });
+    await h.service.inspectPost(post('t3_first', 'alice', KETTO));
+
+    h.setNow(NOW + 3 * HOUR);
+    const finding = await h.service.inspectPost(post('t3_second', 'alice', KETTO));
+
+    expect(finding).toMatchObject({ sameAuthor: true, tooSoon: true, hoursSincePrevious: 3 });
+
+    await h.service.report(finding!);
+    expect(h.reddit.reports[0]?.reason).toContain('after 3h');
+    expect(h.reddit.reports[0]?.reason).toContain('minimum is 24h');
+  });
+
+  it('restarts the clock from the newest allowed repost', async () => {
+    const h = harness({ sameAuthorRepostHours: 24 });
+    await h.service.inspectPost(post('t3_first', 'alice', KETTO));
+
+    // Allowed repost 25h later takes ownership.
+    h.setNow(NOW + 25 * HOUR);
+    expect(await h.service.inspectPost(post('t3_second', 'alice', KETTO))).toBeNull();
+
+    // Another one 3h after THAT is too soon, measured from the second post -
+    // not from the original, which would have said 28h and let it through.
+    h.setNow(NOW + 28 * HOUR);
+    const finding = await h.service.inspectPost(post('t3_third', 'alice', KETTO));
+
+    expect(finding).toMatchObject({ tooSoon: true, hoursSincePrevious: 3 });
+    expect(finding?.originalPostId).toBe('t3_second');
+  });
+
+  it('still reports a DIFFERENT author however long ago the first post was', async () => {
+    const h = harness({ sameAuthorRepostHours: 24 });
+    await h.service.inspectPost(post('t3_first', 'alice', KETTO));
+
+    h.setNow(NOW + 200 * HOUR);
+    const finding = await h.service.inspectPost(post('t3_second', 'bob', KETTO));
+
+    expect(finding).toMatchObject({ sameAuthor: false, tooSoon: false });
+    expect(h.scheduler.jobsNamed(JOBS.duplicateReport)).toHaveLength(1);
+  });
+
+  it('a window of 0 means no waiting period, so nothing is reported', async () => {
+    const h = harness({ sameAuthorRepostHours: 0 });
+    await h.service.inspectPost(post('t3_first', 'alice', KETTO));
+
+    h.setNow(NOW + 500 * HOUR);
+    expect(await h.service.inspectPost(post('t3_second', 'alice', KETTO))).toBeNull();
+  });
+
+  it('a very large window flags every same-author repost, for subs that ban them', async () => {
+    const h = harness({ sameAuthorRepostHours: 8760 });
+    await h.service.inspectPost(post('t3_first', 'alice', KETTO));
+
+    h.setNow(NOW + 500 * HOUR);
+    expect(await h.service.inspectPost(post('t3_second', 'alice', KETTO))).not.toBeNull();
+  });
+
+  it('hands ownership over when same-author reporting is switched off', async () => {
+    const h = harness({ reportSameAuthorReposts: false });
+    await h.service.inspectPost(post('t3_first', 'alice', KETTO));
+    await h.service.inspectPost(post('t3_second', 'alice', KETTO));
+
+    // t3_second now owns the link, so a later different-author post is
+    // compared against it rather than the original.
+    const finding = await h.service.inspectPost(post('t3_third', 'bob', KETTO));
+    expect(finding?.originalPostId).toBe('t3_second');
+  });
+
+  it('tells the moderator when the earlier post was already verified', async () => {
+    const h = harness();
+    await h.service.inspectPost(post('t3_first', 'alice', KETTO));
+    await h.records.putComplete({
+      schemaVersion: 2,
+      postId: 't3_first' as T3,
+      authorName: 'alice',
+      modName: 'mod_one',
+      verifiedAtMs: NOW,
+      status: 'complete',
+      note: '',
+      checklist: null,
+      commentId: 't1_x',
+      deletedAtMs: null,
+      reminderSentAtMs: null,
+      opRespondedAtMs: null,
+      escalatedAtMs: null,
+    });
+
+    const finding = await h.service.inspectPost(post('t3_second', 'bob', KETTO));
+    await h.service.report(finding!);
+
+    expect(h.reddit.reports[0]?.reason).toContain('verified');
   });
 });

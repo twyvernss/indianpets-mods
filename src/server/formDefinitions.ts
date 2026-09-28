@@ -221,6 +221,14 @@ export function settingsFormResponse(current: AppSettings): UiResponse {
                 defaultValue: current.reportSameAuthorReposts,
               },
               {
+                type: 'number',
+                name: 'sameAuthorRepostHours',
+                label: 'Hours before the same person may repost their own link',
+                helpText:
+                  'Match your subreddit rules. A repost that waits this long counts as legitimate and is never reported. 0 = no waiting period. If you do not allow reposts at all, set this very high (8760 = a year).',
+                defaultValue: current.sameAuthorRepostHours,
+              },
+              {
                 type: 'boolean',
                 name: 'scanCommentsForLinks',
                 label: 'Also scan comments for fundraiser links',

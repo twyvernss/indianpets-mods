@@ -24,6 +24,12 @@ export type LinkRepo = {
    * two posts raced.
    */
   claim(linkKey: string, record: LinkRecord, nowMs: number): Promise<LinkRecord>;
+  /**
+   * Moves ownership of an existing link to a newer post, unconditionally.
+   * Used when a repost is legitimate: the newest post owns the link, so the
+   * "how long since last time" clock restarts from it.
+   */
+  transfer(linkKey: string, record: LinkRecord, nowMs: number): Promise<void>;
   /** Remembers which links a post claimed, so a deletion can release them. */
   rememberPostLinks(postId: T3, linkKeys: readonly string[], nowMs: number): Promise<void>;
   /** Releases every link a post owned. Safe to call for an unknown post. */
@@ -82,6 +88,13 @@ export function createLinkRepo(redis: RedisPort): LinkRepo {
 
       const stored = parseJson(await redis.get(key), isLinkRecord);
       return stored ?? record;
+    },
+
+    async transfer(linkKey, record, nowMs) {
+      // No `nx`: this deliberately overwrites the previous owner.
+      await redis.set(keys.link(linkKey), JSON.stringify(record), {
+        expiration: new Date(nowMs + CONFIG.duplicates.linkTtlSeconds * 1000),
+      });
     },
 
     async rememberPostLinks(postId, linkKeys, nowMs) {

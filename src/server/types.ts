@@ -119,4 +119,11 @@ export type DuplicateFinding = {
   shortened: boolean;
   /** True when the same person posted both. Reported more quietly. */
   sameAuthor: boolean;
+  /** Whole hours between the earlier post and this one. */
+  hoursSincePrevious: number;
+  /**
+   * True when a same-author repost arrived sooner than the community allows.
+   * A same-author repost that respects the window is not a finding at all.
+   */
+  tooSoon: boolean;
 };

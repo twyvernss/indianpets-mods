@@ -123,6 +123,11 @@
         "label": "Also report when the same person reposts their own fundraiser link",
         "defaultValue": true
       },
+      "sameAuthorRepostHours": {
+        "type": "number",
+        "label": "Hours before the same person may repost their own fundraiser link. Match your subreddit rules. 0 = no waiting period; set very high (8760) if reposts are not allowed.",
+        "defaultValue": 24
+      },
       "scanCommentsForLinks": {
         "type": "boolean",
         "label": "Also scan comments for fundraiser links (much more traffic)",

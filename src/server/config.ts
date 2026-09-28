@@ -75,6 +75,9 @@ export const CONFIG = {
      * returns immediately and so the post is fully settled on Reddit's side.
      */
     reportDelaySeconds: 10,
+    /** Bounds on the moderator-configurable repost window. */
+    minRepostWindowHours: 0,
+    maxRepostWindowHours: 8760,
   },
 
   intake: {

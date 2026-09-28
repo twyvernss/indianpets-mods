@@ -37,7 +37,13 @@ No moderator's personal account ever appears on the post.
   when it is shared with tracking parameters, a different path shape or a different case.
 - If a link has been seen on an earlier post, the new post is **reported to the modqueue** with the
   earlier post's id and author. It is never removed.
-- A repost by the same author is reported with quieter wording, and can be switched off.
+- **Reposts your rules allow are not flagged.** Set the waiting period to match your subreddit
+  (default 24h). A same-author repost that waited that long is legitimate: it is silently allowed
+  and takes over ownership of the link, so the clock restarts from it. Only a repost that arrives
+  *sooner* than the rule allows is reported, and the report quotes both numbers.
+- A repost from a **different account** is always reported, however long ago the first post was.
+- If the earlier post was already verified, the report says so — usually that means the documents
+  are already on file and the new post needs a glance, not a full re-check.
 - Short links (bit.ly and friends) are indexed and flagged as unexpanded — see *Short links* below.
 
 **Stale fundraisers (v2)**
@@ -133,9 +139,12 @@ streams logs. You can pin a default subreddit by adding this to `devvit.json`:
    note you typed on step one should be pre-filled.
 7. From the subreddit's `...` menu, open **Fundraiser tools settings**, change something, save, and
    confirm the change took effect on the next action.
-8. Post two different posts containing the same Ketto/Milaap URL. The second should land in the
-   modqueue within about ten seconds, reported, *not* removed.
-9. Check `devvit logs` for the structured JSON lines.
+8. Post two different posts containing the same Ketto/Milaap URL **from two different accounts**.
+   The second should land in the modqueue within about ten seconds, reported, *not* removed.
+9. Post the same link twice from the **same** account. Within the waiting period it is reported
+   with "Reposted after Nh, minimum is 24h"; set the waiting period to 0 in settings and it is not
+   reported at all.
+10. Check `devvit logs` for the structured JSON lines.
 
 Testing the reminder flow without waiting 30 days: set **Days after verification** to `1` in the
 settings form, verify a post, and either wait for the nightly job or trigger it from the Devvit
@@ -197,7 +206,8 @@ Layer 1 wins over layer 2, which wins over the built-in defaults.
 | Custom intake wording | blank | Supports `{subreddit}`, `{op}`. |
 | Show author age/karma on the verify form | on | Moderator-only context line. Costs one extra lookup when opening the form. |
 | Detect repeated fundraiser links | on | Reports repeats to the modqueue. |
-| Report same-author reposts | on | Off means they are logged only. |
+| Report same-author reposts | on | Off means they are logged only, never reported. |
+| Hours before the same person may repost | 24 | Match your subreddit rules. A repost that waits this long is never reported. `0` = no waiting period (never reported). Set very high (`8760`) if you do not allow reposts at all. |
 | Scan comments for links | **off** | Much more traffic for a comparatively rare signal. |
 | Ask the OP for an update | on | The nightly staleness sweep. |
 | Days before asking for an update | 30 | Clamped to 1–365. |
@@ -315,7 +325,7 @@ npm run test:types
 npm run check
 ```
 
-144 tests across pure logic (sanitisation, dates, retry classification, settings resolution and
+152 tests across pure logic (sanitisation, dates, retry classification, settings resolution and
 clamping, checklist parsing, comment wording, URL normalisation, hashing) and the four services
 against in-memory fakes: idempotency, concurrent runs, expired and mismatched tokens, missing posts,
 deleted authors, v1→v2 record migration, every partial-failure path, duplicate races, link release
@@ -333,5 +343,5 @@ service layer, which is tested; the handlers are exercised during playtest.
 
 ## Test counts
 
-144 unit tests across six files. Everything below the HTTP handlers is covered; the handlers
+152 unit tests across six files. Everything below the HTTP handlers is covered; the handlers
 themselves are exercised during playtest.

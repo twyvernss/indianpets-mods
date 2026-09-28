@@ -1,6 +1,7 @@
 import type { T3 } from '@devvit/web/shared';
 import { CONFIG, JOBS } from '../config.js';
 import type { LinkRepo } from '../data/linkRepo.js';
+import type { VerificationRepo } from '../data/verificationRepo.js';
 import type { Logger } from '../lib/logger.js';
 import { describeError } from '../lib/logger.js';
 import { collectLinks } from '../lib/urls.js';
@@ -9,8 +10,12 @@ import { buildAuthorRiskNote, buildDuplicateReportReason } from '../text.js';
 import type { DuplicateFinding, LinkRecord } from '../types.js';
 import type { RedditPort, SchedulerPort } from './redditPort.js';
 
+const HOUR_MS = 3_600_000;
+
 export type DuplicateDeps = {
   links: LinkRepo;
+  /** Read-only here: used to say whether the earlier post was already verified. */
+  records: VerificationRepo;
   reddit: RedditPort;
   scheduler: SchedulerPort;
   settings: SettingsReader;
@@ -39,7 +44,7 @@ export type DuplicateService = {
 };
 
 export function createDuplicateService(deps: DuplicateDeps): DuplicateService {
-  const { links, reddit, scheduler, settings, log, now } = deps;
+  const { links, records, reddit, scheduler, settings, log, now } = deps;
 
   return {
     async inspectPost(input): Promise<DuplicateFinding | null> {
@@ -58,31 +63,30 @@ export function createDuplicateService(deps: DuplicateDeps): DuplicateService {
       // One batched read for every link in the post - never one call per link.
       const owners = await links.findOwners(found.map((link) => link.key));
 
-      let finding: DuplicateFinding | null = null;
-      const claimed: string[] = [];
+      /** Keys this post should end up owning. */
+      const owned: string[] = [];
+      /** Keys currently held by an earlier post. */
+      const contested: string[] = [];
+      let earliest: { record: LinkRecord; display: string; shortened: boolean } | null = null;
 
       for (const link of found) {
         const existing = owners.get(link.key);
 
         if (existing && existing.postId !== input.postId) {
-          // Report the FIRST duplicate only. A post that repeats one campaign
-          // across five URL shapes is one problem, not five modqueue entries.
-          finding ??= {
-            postId: input.postId,
-            author: input.author,
-            originalPostId: existing.postId,
-            originalAuthor: existing.author,
-            display: link.display,
-            shortened: link.shortened,
-            sameAuthor:
-              existing.author !== null &&
-              input.author !== null &&
-              existing.author.toLowerCase() === input.author.toLowerCase(),
-          };
+          contested.push(link.key);
+          // Report against the OLDEST clash, so the age we quote is the real
+          // gap between this post and the first time we saw the link.
+          if (!earliest || existing.firstSeenMs < earliest.record.firstSeenMs) {
+            earliest = { record: existing, display: link.display, shortened: link.shortened };
+          }
           continue;
         }
 
-        if (existing) continue; // This post already owns it (redelivered trigger).
+        if (existing) {
+          // This post already owns it - a redelivered trigger.
+          owned.push(link.key);
+          continue;
+        }
 
         const record: LinkRecord = {
           postId: input.postId,
@@ -96,34 +100,83 @@ export function createDuplicateService(deps: DuplicateDeps): DuplicateService {
         // ago, the stored record comes back instead of ours.
         const owner = await links.claim(link.key, record, timestamp);
         if (owner.postId === input.postId) {
-          claimed.push(link.key);
-        } else if (!finding) {
-          finding = {
-            postId: input.postId,
-            author: input.author,
-            originalPostId: owner.postId,
-            originalAuthor: owner.author,
-            display: link.display,
-            shortened: link.shortened,
-            sameAuthor:
-              owner.author !== null &&
-              input.author !== null &&
-              owner.author.toLowerCase() === input.author.toLowerCase(),
-          };
+          owned.push(link.key);
+        } else {
+          contested.push(link.key);
+          if (!earliest || owner.firstSeenMs < earliest.record.firstSeenMs) {
+            earliest = { record: owner, display: link.display, shortened: link.shortened };
+          }
         }
       }
 
-      await links.rememberPostLinks(input.postId, claimed, timestamp);
-
-      if (!finding) return null;
-
-      if (finding.sameAuthor && !config.reportSameAuthorReposts) {
-        // "Flagged more quietly": recorded in the logs, no modqueue entry.
-        scoped.info('same-author repost (not reported)', {
-          originalPostId: finding.originalPostId,
-        });
+      if (!earliest) {
+        await links.rememberPostLinks(input.postId, owned, timestamp);
         return null;
       }
+
+      const previous = earliest.record;
+      const sameAuthor =
+        previous.author !== null &&
+        input.author !== null &&
+        previous.author.toLowerCase() === input.author.toLowerCase();
+
+      const ageMs = Math.max(0, timestamp - previous.firstSeenMs);
+      const hoursSincePrevious = Math.floor(ageMs / HOUR_MS);
+      const windowMs = config.sameAuthorRepostHours * HOUR_MS;
+
+      /**
+       * Hands the contested links to this post and records the whole set.
+       *
+       * Used when the repost is legitimate, so the newest post owns the link
+       * and the "how long since last time" clock restarts from it. Without
+       * this, someone allowed to repost every 24 hours would be measured
+       * against their very first post forever.
+       */
+      const takeOver = async (): Promise<void> => {
+        for (const linkKey of contested) {
+          await links.transfer(
+            linkKey,
+            {
+              postId: input.postId,
+              author: input.author,
+              firstSeenMs: timestamp,
+              display: earliest?.display ?? '',
+              shortened: earliest?.shortened ?? false,
+            },
+            timestamp,
+          );
+        }
+        await links.rememberPostLinks(input.postId, [...owned, ...contested], timestamp);
+      };
+
+      if (sameAuthor) {
+        // The subreddit allows a repost after `sameAuthorRepostHours`. One that
+        // respects the rule is not a duplicate at all - reporting it would put
+        // a legitimate post in the modqueue every single time.
+        if (!config.reportSameAuthorReposts || ageMs >= windowMs) {
+          await takeOver();
+          scoped.info('same-author repost allowed', {
+            originalPostId: previous.postId,
+            hoursSincePrevious,
+            reason: config.reportSameAuthorReposts ? 'outside repost window' : 'reporting disabled',
+          });
+          return null;
+        }
+      }
+
+      await links.rememberPostLinks(input.postId, owned, timestamp);
+
+      const finding: DuplicateFinding = {
+        postId: input.postId,
+        author: input.author,
+        originalPostId: previous.postId,
+        originalAuthor: previous.author,
+        display: earliest.display,
+        shortened: earliest.shortened,
+        sameAuthor,
+        hoursSincePrevious,
+        tooSoon: sameAuthor,
+      };
 
       // Idempotency: a redelivered trigger must not produce a second report.
       if (await links.wasReported(input.postId)) {
@@ -148,7 +201,9 @@ export function createDuplicateService(deps: DuplicateDeps): DuplicateService {
 
       scoped.info('duplicate link found', {
         originalPostId: finding.originalPostId,
-        sameAuthor: finding.sameAuthor,
+        sameAuthor,
+        tooSoon: finding.tooSoon,
+        hoursSincePrevious,
         shortened: finding.shortened,
       });
       return finding;
@@ -158,7 +213,16 @@ export function createDuplicateService(deps: DuplicateDeps): DuplicateService {
       const config = await settings.get();
       if (!config.enabled || !config.duplicateDetectionEnabled) return;
 
-      let reason = buildDuplicateReportReason(finding);
+      // Saying "the earlier post was already verified" is the single most
+      // useful thing a moderator can know here: it usually means the documents
+      // are on file and this needs a glance rather than a full re-check.
+      const previousRecord = await records.get(finding.originalPostId);
+      const previouslyVerified = previousRecord?.status === 'complete';
+
+      let reason = buildDuplicateReportReason(finding, {
+        previouslyVerified,
+        minimumHours: config.sameAuthorRepostHours,
+      });
 
       // Author thresholds only ever annotate a report that was going to happen
       // anyway. They never cause one, and they never cause a removal.
@@ -168,7 +232,8 @@ export function createDuplicateService(deps: DuplicateDeps): DuplicateService {
           const note = buildAuthorRiskNote({
             accountAgeDays: author.accountAgeDays,
             karma: author.karma,
-            belowAge: config.minAccountAgeDays > 0 && author.accountAgeDays < config.minAccountAgeDays,
+            belowAge:
+              config.minAccountAgeDays > 0 && author.accountAgeDays < config.minAccountAgeDays,
             belowKarma: config.minKarma > 0 && author.karma < config.minKarma,
           });
           if (note && reason.length + note.length <= CONFIG.reportReasonMaxLength) {
@@ -182,6 +247,7 @@ export function createDuplicateService(deps: DuplicateDeps): DuplicateService {
         postId: finding.postId,
         originalPostId: finding.originalPostId,
         sameAuthor: finding.sameAuthor,
+        previouslyVerified,
       });
     },
 
@@ -205,6 +271,8 @@ export function isDuplicateFinding(value: unknown): value is DuplicateFinding {
     (candidate['originalAuthor'] === null || typeof candidate['originalAuthor'] === 'string') &&
     typeof candidate['display'] === 'string' &&
     typeof candidate['shortened'] === 'boolean' &&
-    typeof candidate['sameAuthor'] === 'boolean'
+    typeof candidate['sameAuthor'] === 'boolean' &&
+    typeof candidate['hoursSincePrevious'] === 'number' &&
+    typeof candidate['tooSoon'] === 'boolean'
   );
 }

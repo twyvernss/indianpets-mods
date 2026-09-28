@@ -165,20 +165,33 @@ export function buildStaleReportReason(daysSinceVerified: number): string {
 /**
  * Modqueue report reason for a repeated fundraiser link.
  *
- * A same-author repost is reported with different wording so moderators can
- * tell at a glance whether they are looking at someone re-sharing their own
- * campaign (common and usually fine) or two different accounts pushing the same
- * link (the case worth investigating).
+ * The two cases read very differently on purpose. A same-author repost inside
+ * the waiting period is a rules matter and says so with the numbers. The same
+ * link from a DIFFERENT account is the one worth investigating, and never
+ * mentions timing, because it is a problem however long ago it happened.
  */
-export function buildDuplicateReportReason(finding: DuplicateFinding): string {
+export function buildDuplicateReportReason(
+  finding: DuplicateFinding,
+  context: { previouslyVerified: boolean; minimumHours: number },
+): string {
+  const shortNote = finding.shortened ? ' [short link unchecked]' : '';
+  const verified = context.previouslyVerified ? ' - earlier post was verified' : '';
+
+  // A same-author repost only reaches here when it broke the community's
+  // waiting period, so the reason says exactly that rather than implying the
+  // person did something suspicious by reposting at all.
+  if (finding.sameAuthor) {
+    return truncate(
+      `Reposted after ${finding.hoursSincePrevious}h, minimum is ${context.minimumHours}h: same link as ${finding.originalPostId}${verified}${shortNote}`,
+      CONFIG.reportReasonMaxLength,
+    );
+  }
+
   const original = finding.originalAuthor ? `u/${finding.originalAuthor}` : 'a deleted account';
-  const shortNote = finding.shortened ? ' [short link, destination unchecked]' : '';
-
-  const reason = finding.sameAuthor
-    ? `Repost: same link as this author's earlier post ${finding.originalPostId}${shortNote}`
-    : `Same fundraiser link as post ${finding.originalPostId} by ${original}${shortNote}`;
-
-  return truncate(reason, CONFIG.reportReasonMaxLength);
+  return truncate(
+    `Same fundraiser link as post ${finding.originalPostId} by ${original}${verified}${shortNote}`,
+    CONFIG.reportReasonMaxLength,
+  );
 }
 
 /** Appended to a report when the author is below the configured thresholds. */

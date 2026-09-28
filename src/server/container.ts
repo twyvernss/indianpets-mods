@@ -83,7 +83,15 @@ export function getContainer(): Container {
     newId: () => globalThis.crypto.randomUUID(),
   });
 
-  const duplicates = createDuplicateService({ links, reddit, scheduler, settings, log, now });
+  const duplicates = createDuplicateService({
+    links,
+    records: repo,
+    reddit,
+    scheduler,
+    settings,
+    log,
+    now,
+  });
   const reminders = createReminderService({ repo, reddit, scheduler, settings, log, now });
   const intake = createIntakeService({
     redis: redisPort,

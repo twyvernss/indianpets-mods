@@ -50,6 +50,15 @@ export type AppSettings = {
   scanCommentsForLinks: boolean;
   /** When false, someone reposting their own link is logged but not reported. */
   reportSameAuthorReposts: boolean;
+  /**
+   * How long someone must wait before reposting their own fundraiser link.
+   *
+   * Set it to whatever the subreddit rules allow: a repost that waits this long
+   * is legitimate and is never reported. 0 means there is no waiting period, so
+   * same-author reposts are never reported at all. If reposts are NOT allowed,
+   * set it very high (8760 = a year) so every one of them is flagged.
+   */
+  sameAuthorRepostHours: number;
 
   /* --- stale fundraiser reminders --- */
   staleRemindersEnabled: boolean;
@@ -78,6 +87,7 @@ export const OVERRIDABLE_KEYS = [
   'duplicateDetectionEnabled',
   'scanCommentsForLinks',
   'reportSameAuthorReposts',
+  'sameAuthorRepostHours',
   'staleRemindersEnabled',
   'reminderDays',
   'graceDays',
@@ -103,6 +113,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   duplicateDetectionEnabled: true,
   scanCommentsForLinks: false,
   reportSameAuthorReposts: true,
+  sameAuthorRepostHours: 24,
 
   staleRemindersEnabled: true,
   reminderDays: 30,
@@ -205,6 +216,12 @@ export function parseSettings(raw: Record<string, unknown>): AppSettings {
     reportSameAuthorReposts: coerceBoolean(
       raw['reportSameAuthorReposts'],
       DEFAULT_SETTINGS.reportSameAuthorReposts,
+    ),
+    sameAuthorRepostHours: coerceNumber(
+      raw['sameAuthorRepostHours'],
+      DEFAULT_SETTINGS.sameAuthorRepostHours,
+      CONFIG.duplicates.minRepostWindowHours,
+      CONFIG.duplicates.maxRepostWindowHours,
     ),
 
     staleRemindersEnabled: coerceBoolean(
