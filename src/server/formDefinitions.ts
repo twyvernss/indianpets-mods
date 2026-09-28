@@ -2,7 +2,12 @@ import type { FormField, UiResponse } from '@devvit/web/shared';
 import { CONFIG } from './config.js';
 import type { AppSettings } from './settings.js';
 import { ANY_FLAIR, checklistItemsToText } from './settings.js';
-import { DEFAULT_NOTICE_TEMPLATE, FORM_TEXT } from './text.js';
+import {
+  DEFAULT_INTAKE_TEMPLATE,
+  DEFAULT_NOTICE_TEMPLATE,
+  DEFAULT_REMINDER_TEMPLATE,
+  FORM_TEXT,
+} from './text.js';
 import type { ChecklistItem, MessageTemplate } from './types.js';
 
 /**
@@ -202,18 +207,20 @@ export function noticesFormResponse(current: AppSettings): UiResponse {
             name: 'automodReplyText',
             label: 'Message when AutoModerator holds a fundraiser',
             helpText:
-              'Only posted if that feature is switched on in settings. Blank uses the built-in text. Placeholders: {subreddit}, {op}.',
-            lineHeight: 6,
-            defaultValue: current.automodReplyText,
+              'Only posted if that feature is switched on in settings. Clear the box to go back to the built-in text. Placeholders: {subreddit}, {op}.',
+            lineHeight: 8,
+            // Prefilled with the real wording rather than left blank: an empty
+            // box tells a moderator nothing about what the bot would say.
+            defaultValue: current.automodReplyText || DEFAULT_INTAKE_TEMPLATE,
           },
           {
             type: 'paragraph',
             name: 'customReminderText',
             label: 'Message asking the OP for an update on an old fundraiser',
             helpText:
-              'Blank uses the built-in text. Placeholders: {subreddit}, {op}, {days}, {grace}.',
-            lineHeight: 6,
-            defaultValue: current.customReminderText,
+              'Clear the box to go back to the built-in text. Placeholders: {subreddit}, {op}, {days}, {grace}.',
+            lineHeight: 8,
+            defaultValue: current.customReminderText || DEFAULT_REMINDER_TEMPLATE,
           },
         ],
       },

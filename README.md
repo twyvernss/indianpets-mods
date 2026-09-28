@@ -347,6 +347,17 @@ All wording lives behind its own menu action, **"Edit bot messages"**: the defau
 numbered saved notices (title + message each), the AutoModerator intake reply and the staleness
 reminder.
 
+**Every box is prefilled with the text the bot actually posts.** None of them are blank with a
+"leave empty for the built-in wording" hint, because that tells a moderator nothing about what the
+built-in wording says. Each message is defined once in `text.ts` as a template with `{placeholder}`
+tokens (`DEFAULT_NOTICE_TEMPLATE`, `DEFAULT_INTAKE_TEMPLATE`, `DEFAULT_REMINDER_TEMPLATE`) and
+rendered through one substitution path, so saving a prefilled box unchanged produces byte-identical
+output to leaving it empty - asserted by a test for all three. Clearing a box restores the built-in
+text.
+
+An unknown placeholder is left visible rather than blanked, so a typo shows up in the posted comment
+instead of leaving a hole in a sentence.
+
 Saved notices are stored as one `---`-separated block, the same format the raw subreddit setting
 has always used, so the editor is purely a nicer front end and hand-editing the setting still works.
 A slot needs **both** a title and a message to count - a title alone would post an empty comment, a
@@ -446,7 +457,7 @@ npm run test:types
 npm run check
 ```
 
-220 tests across pure logic (sanitisation, dates, retry classification, settings resolution and
+224 tests across pure logic (sanitisation, dates, retry classification, settings resolution and
 clamping, checklist parsing, comment wording, URL normalisation, hashing) and the four services
 against in-memory fakes: idempotency, concurrent runs, expired and mismatched tokens, missing posts,
 deleted authors, v1→v2 record migration, every partial-failure path, duplicate races, link release
@@ -464,5 +475,5 @@ service layer, which is tested; the handlers are exercised during playtest.
 
 ## Test counts
 
-220 unit tests across seven files. Everything below the HTTP handlers is covered; the handlers
+224 unit tests across seven files. Everything below the HTTP handlers is covered; the handlers
 themselves are exercised during playtest.

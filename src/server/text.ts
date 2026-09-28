@@ -178,24 +178,38 @@ export function starterTemplates(): string {
  * next. It must never imply the fundraiser is suspect - most are simply still
  * running.
  */
+export const DEFAULT_REMINDER_TEMPLATE = [
+  '{op}, this fundraiser was verified by the r/{subreddit} mod team {days} days ago.',
+  '',
+  'Could you post a short update as a reply here? Either:',
+  '',
+  '- how the treatment or rescue is going, and whether you still need help, or',
+  '- that the fundraiser is **complete** and no longer taking donations.',
+  '',
+  'Keeping this current helps people decide whether to donate. If we do not hear anything in the next {grace} days, a moderator will take a look at the post.',
+].join('\n');
+
+/**
+ * The staleness reminder posted on a fundraiser that has gone quiet.
+ *
+ * It is addressed to the OP, asks for one specific thing, and says what
+ * happens next. It must never imply the fundraiser is suspect - most are
+ * simply still running.
+ */
 export function buildReminderComment(input: {
+  /** Subreddit override; blank means the built-in wording. */
+  custom: string;
   subredditName: string;
   authorName: string | null;
   daysSinceVerified: number;
   graceDays: number;
 }): string {
-  const greeting = input.authorName ? `u/${input.authorName}` : 'Hi there';
-
-  return [
-    `${greeting}, this fundraiser was verified by the r/${input.subredditName} mod team ${input.daysSinceVerified} days ago.`,
-    '',
-    'Could you post a short update as a reply here? Either:',
-    '',
-    '- how the treatment or rescue is going, and whether you still need help, or',
-    '- that the fundraiser is **complete** and no longer taking donations.',
-    '',
-    `Keeping this current helps people decide whether to donate. If we do not hear anything in the next ${input.graceDays} days, a moderator will take a look at the post.`,
-  ].join('\n');
+  return applyPlaceholders(input.custom.trim() || DEFAULT_REMINDER_TEMPLATE, {
+    subreddit: input.subredditName,
+    op: input.authorName ? `u/${input.authorName}` : 'Hi there',
+    days: String(input.daysSinceVerified),
+    grace: String(input.graceDays),
+  });
 }
 
 /** Modqueue report reason for a fundraiser that never answered its reminder. */
@@ -274,14 +288,18 @@ export function buildModNote(input: {
   return parts.join(' ');
 }
 
-function applyPlaceholders(
-  template: string,
-  values: Readonly<Record<'subreddit' | 'date' | 'mod', string>>,
-): string {
-  return template
-    .replaceAll('{subreddit}', values.subreddit)
-    .replaceAll('{date}', values.date)
-    .replaceAll('{mod}', values.mod);
+/** Substitutes `{name}` tokens. Unknown tokens are left alone, not blanked.
+ *
+ * Leaving them alone matters: a moderator who mistypes a placeholder sees the
+ * literal text in the posted comment and can spot their error, rather than
+ * silently posting a sentence with a hole in it.
+ */
+function applyPlaceholders(template: string, values: Readonly<Record<string, string>>): string {
+  let rendered = template;
+  for (const [name, value] of Object.entries(values)) {
+    rendered = rendered.replaceAll(`{${name}}`, value);
+  }
+  return rendered;
 }
 
 function truncate(value: string, maxLength: number): string {
@@ -295,41 +313,38 @@ function truncate(value: string, maxLength: number): string {
  * posts are genuine people with a sick animal. It says what is needed, where to
  * send it, and what happens next. It never promises a timeframe.
  */
-export function buildIntakeComment(input: {
-  subredditName: string;
-  authorName: string | null;
-}): string {
-  const greeting = input.authorName ? `u/${input.authorName}` : 'Hi there';
+export const DEFAULT_INTAKE_TEMPLATE = [
+  '{op}, your post is held for review while the r/{subreddit} mod team checks the details. This is routine for every fundraiser here and is not an accusation.',
+  '',
+  '**To get it approved, please [send us a modmail](https://www.reddit.com/message/compose?to=/r/{subreddit}) with:**',
+  '',
+  '1. The vet bill or treatment estimate, showing the clinic name and your name.',
+  '2. A photo of the animal together with a handwritten note showing your Reddit username and the date.',
+  '3. The clinic phone number, so we can confirm the treatment.',
+  '4. The fundraiser link, and who receives the money.',
+  '',
+  'Please **do not** post these documents publicly, they usually contain your address and phone number. Send them by modmail only.',
+  '',
+  'Once we have checked them, your post is approved automatically and a verification notice is added to it.',
+].join('\n');
 
-  return [
-    `${greeting}, your post is held for review while the r/${input.subredditName} mod team checks the details. This is routine for every fundraiser here and is not an accusation.`,
-    '',
-    '**To get it approved, please [send us a modmail]' +
-      `(https://www.reddit.com/message/compose?to=/r/${input.subredditName}) with:**`,
-    '',
-    '1. The vet bill or treatment estimate, showing the clinic name and your name.',
-    '2. A photo of the animal together with a handwritten note showing your Reddit username and today’s date.',
-    '3. The clinic’s phone number, so we can confirm the treatment.',
-    '4. The fundraiser link, and who receives the money.',
-    '',
-    'Please **do not** post these documents publicly, they usually contain your address and phone number. Send them by modmail only.',
-    '',
-    'Once we have checked them, your post is approved automatically and a verification notice is added to it.',
-  ].join('\n');
-}
-
-/** Applies a subreddit's custom intake wording, or the built-in default. */
+/**
+ * The reply posted to an OP when AutoModerator holds their fundraiser.
+ *
+ * It must read as helpful, not accusatory - the overwhelming majority of
+ * these posts are genuine people with a sick animal. It says what is needed,
+ * where to send it, and what happens next. It never promises a timeframe.
+ */
 export function renderIntakeComment(input: {
+  /** Subreddit override; blank means the built-in wording. */
   custom: string;
   subredditName: string;
   authorName: string | null;
 }): string {
-  if (input.custom.trim().length > 0) {
-    return input.custom
-      .replaceAll('{subreddit}', input.subredditName)
-      .replaceAll('{op}', input.authorName ? `u/${input.authorName}` : 'Hi there');
-  }
-  return buildIntakeComment(input);
+  return applyPlaceholders(input.custom.trim() || DEFAULT_INTAKE_TEMPLATE, {
+    subreddit: input.subredditName,
+    op: input.authorName ? `u/${input.authorName}` : 'Hi there',
+  });
 }
 
 /**

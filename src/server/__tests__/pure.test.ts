@@ -22,8 +22,12 @@ import {
 } from '../settings.js';
 import {
   buildModNote,
+  buildReminderComment,
   buildVerificationComment,
+  DEFAULT_INTAKE_TEMPLATE,
   DEFAULT_NOTICE_TEMPLATE,
+  DEFAULT_REMINDER_TEMPLATE,
+  renderIntakeComment,
   starterTemplates,
 } from '../text.js';
 import { fakeLogger, FakeConfigRepo } from './fakes.js';
@@ -537,5 +541,53 @@ describe('notice editor round trip', () => {
 
   it('an empty editor falls back to the starter notices, not to nothing', () => {
     expect(parseSettings({ messageTemplates: '' }).messageTemplates.length).toBeGreaterThan(0);
+  });
+});
+
+describe('every bot message is an editable template', () => {
+  it('the reminder renders the same blank or prefilled', () => {
+    const args = {
+      subredditName: 'IndianPets',
+      authorName: 'op_user',
+      daysSinceVerified: 40,
+      graceDays: 7,
+    };
+    const blank = buildReminderComment({ ...args, custom: '' });
+    const prefilled = buildReminderComment({ ...args, custom: DEFAULT_REMINDER_TEMPLATE });
+
+    expect(prefilled).toBe(blank);
+    expect(blank).toContain('u/op_user');
+    expect(blank).toContain('40 days ago');
+    expect(blank).toContain('next 7 days');
+  });
+
+  it('the intake message renders the same blank or prefilled', () => {
+    const args = { subredditName: 'IndianPets', authorName: 'op_user' };
+    const blank = renderIntakeComment({ ...args, custom: '' });
+    const prefilled = renderIntakeComment({ ...args, custom: DEFAULT_INTAKE_TEMPLATE });
+
+    expect(prefilled).toBe(blank);
+    expect(blank).toContain('u/op_user');
+    expect(blank).toContain('do not** post these documents publicly');
+  });
+
+  it('greets politely when the author account is gone', () => {
+    const comment = renderIntakeComment({
+      subredditName: 'IndianPets',
+      authorName: null,
+      custom: '',
+    });
+    expect(comment.startsWith('Hi there,')).toBe(true);
+  });
+
+  it('leaves an unknown placeholder visible instead of blanking it', () => {
+    // A mistyped placeholder should be obvious in the posted comment, not a
+    // silent hole in a sentence.
+    const comment = renderIntakeComment({
+      subredditName: 'IndianPets',
+      authorName: 'op_user',
+      custom: 'Hello {op}, see r/{subredit} rules.',
+    });
+    expect(comment).toBe('Hello u/op_user, see r/{subredit} rules.');
   });
 });

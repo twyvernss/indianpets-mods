@@ -178,7 +178,7 @@ export function createReminderService(deps: ReminderDeps): ReminderService {
       try {
         await reddit.submitAppComment(
           record.postId,
-          renderReminder({
+          buildReminderComment({
             custom: config.customReminderText,
             subredditName: reddit.subredditName(),
             authorName: record.authorName,
@@ -206,28 +206,4 @@ export function createReminderService(deps: ReminderDeps): ReminderService {
     await repo.closeOpen(record.postId);
     return 'escalated';
   }
-}
-
-/** Applies the subreddit's custom reminder wording, or the built-in default. */
-function renderReminder(input: {
-  custom: string;
-  subredditName: string;
-  authorName: string | null;
-  daysSinceVerified: number;
-  graceDays: number;
-}): string {
-  if (input.custom.trim().length > 0) {
-    return input.custom
-      .replaceAll('{subreddit}', input.subredditName)
-      .replaceAll('{op}', input.authorName ? `u/${input.authorName}` : 'Hi there')
-      .replaceAll('{days}', String(input.daysSinceVerified))
-      .replaceAll('{grace}', String(input.graceDays));
-  }
-
-  return buildReminderComment({
-    subredditName: input.subredditName,
-    authorName: input.authorName,
-    daysSinceVerified: input.daysSinceVerified,
-    graceDays: input.graceDays,
-  });
 }
