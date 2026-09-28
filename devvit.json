@@ -65,6 +65,9 @@
       },
       "duplicate-report": {
         "endpoint": "/internal/jobs/duplicate-report"
+      },
+      "automod-reply": {
+        "endpoint": "/internal/jobs/automod-reply"
       }
     }
   },
@@ -94,6 +97,21 @@
         "type": "paragraph",
         "label": "Verification checklist items, one per line. Blank uses the built-in list.",
         "defaultValue": ""
+      },
+      "automodReplyEnabled": {
+        "type": "boolean",
+        "label": "Reply to the OP when AutoModerator holds a fundraiser, listing the documents needed",
+        "defaultValue": false
+      },
+      "automodReplyText": {
+        "type": "paragraph",
+        "label": "Custom intake wording. Blank uses the built-in text. Placeholders: {subreddit}, {op}",
+        "defaultValue": ""
+      },
+      "showAuthorSummary": {
+        "type": "boolean",
+        "label": "Show the author's account age and karma on the verify form",
+        "defaultValue": true
       },
       "duplicateDetectionEnabled": {
         "type": "boolean",

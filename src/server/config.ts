@@ -77,6 +77,17 @@ export const CONFIG = {
     reportDelaySeconds: 10,
   },
 
+  intake: {
+    /**
+     * Delay before the "what we need from you" reply is posted after
+     * AutoModerator filters a post. Non-zero so the trigger returns at once,
+     * and so AutoModerator's own comment lands first.
+     */
+    replyDelaySeconds: 15,
+    /** Stops a redelivered trigger replying twice to the same post. */
+    repliedTtlSeconds: 30 * 24 * 60 * 60,
+  },
+
   reminders: {
     /**
      * Posts handled per scheduled run.
@@ -116,6 +127,8 @@ export const JOBS = {
   staleSweepBatch: 'stale-sweep-batch',
   /** Files a duplicate-link report, off the trigger's hot path. */
   duplicateReport: 'duplicate-report',
+  /** Replies to an OP whose fundraiser AutoModerator has just held. */
+  automodReply: 'automod-reply',
 } as const;
 
 /**

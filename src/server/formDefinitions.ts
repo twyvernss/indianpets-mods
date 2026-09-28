@@ -22,13 +22,22 @@ import type { ChecklistItem } from './types.js';
  * survives the round trip without being shown to the moderator.
  */
 
-export function verifyFormResponse(token: string): UiResponse {
+export function verifyFormResponse(token: string, authorSummary: string | null): UiResponse {
+  // The author line is prepended to the description rather than added as a
+  // disabled field, because a disabled field still looks like something the
+  // moderator is meant to fill in.
+  const description = authorSummary
+    ? `${authorSummary}
+
+${FORM_TEXT.verifyDescription}`
+    : FORM_TEXT.verifyDescription;
+
   return {
     showForm: {
       name: 'verifyForm',
       form: {
         title: FORM_TEXT.verifyTitle,
-        description: FORM_TEXT.verifyDescription,
+        description,
         acceptLabel: FORM_TEXT.verifyAccept,
         cancelLabel: FORM_TEXT.verifyCancel,
         fields: [
@@ -163,6 +172,35 @@ export function settingsFormResponse(current: AppSettings): UiResponse {
                   'Blank uses the built-in wording. Placeholders: {subreddit}, {date}, {mod}. Keep the "not a guarantee" and "donate at your own discretion" language.',
                 lineHeight: 5,
                 defaultValue: current.customNoticeText,
+              },
+              {
+                type: 'boolean',
+                name: 'showAuthorSummary',
+                label: "Show the author's account age and karma on this form",
+                helpText: 'Moderator-only. Costs a moment longer to open the form.',
+                defaultValue: current.showAuthorSummary,
+              },
+            ],
+          },
+          {
+            type: 'group',
+            label: 'When AutoModerator holds a fundraiser',
+            fields: [
+              {
+                type: 'boolean',
+                name: 'automodReplyEnabled',
+                label: 'Reply to the OP listing the documents we need',
+                helpText:
+                  'Off by default. If AutoModerator already posts a similar comment, remove that one first - two bot comments on a post is worse than one.',
+                defaultValue: current.automodReplyEnabled,
+              },
+              {
+                type: 'paragraph',
+                name: 'automodReplyText',
+                label: 'Custom intake wording',
+                helpText: 'Blank uses the built-in text. Placeholders: {subreddit}, {op}.',
+                lineHeight: 6,
+                defaultValue: current.automodReplyText,
               },
             ],
           },

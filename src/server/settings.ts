@@ -32,6 +32,18 @@ export type AppSettings = {
   /** Moderator-editable tick-boxes, already parsed and bounded. */
   checklistItems: ChecklistItem[];
 
+  /**
+   * Reply to the OP when AutoModerator holds their fundraiser, telling them
+   * what to send. Off by default: most subreddits already have AutoModerator
+   * post something similar, and two bot comments on one post is worse than
+   * none. Turn this on and remove the AutoModerator comment.
+   */
+  automodReplyEnabled: boolean;
+  /** Blank means "use the built-in intake wording". */
+  automodReplyText: string;
+  /** Show the author's account age and karma on the verify form. */
+  showAuthorSummary: boolean;
+
   /* --- duplicate link detection --- */
   duplicateDetectionEnabled: boolean;
   /** Off by default: scanning every comment is a lot of work for a rare signal. */
@@ -60,6 +72,9 @@ export const OVERRIDABLE_KEYS = [
   'showVerifyingModInComment',
   'customNoticeText',
   'checklistItems',
+  'automodReplyEnabled',
+  'automodReplyText',
+  'showAuthorSummary',
   'duplicateDetectionEnabled',
   'scanCommentsForLinks',
   'reportSameAuthorReposts',
@@ -81,6 +96,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   showVerifyingModInComment: false,
   customNoticeText: '',
   checklistItems: toChecklistItems(DEFAULT_CHECKLIST_LABELS),
+  automodReplyEnabled: false,
+  automodReplyText: '',
+  showAuthorSummary: true,
 
   duplicateDetectionEnabled: true,
   scanCommentsForLinks: false,
@@ -169,6 +187,12 @@ export function parseSettings(raw: Record<string, unknown>): AppSettings {
     ),
     customNoticeText: coerceString(raw['customNoticeText'], DEFAULT_SETTINGS.customNoticeText),
     checklistItems: parseChecklistItems(raw['checklistItems']),
+    automodReplyEnabled: coerceBoolean(
+      raw['automodReplyEnabled'],
+      DEFAULT_SETTINGS.automodReplyEnabled,
+    ),
+    automodReplyText: coerceString(raw['automodReplyText'], DEFAULT_SETTINGS.automodReplyText),
+    showAuthorSummary: coerceBoolean(raw['showAuthorSummary'], DEFAULT_SETTINGS.showAuthorSummary),
 
     duplicateDetectionEnabled: coerceBoolean(
       raw['duplicateDetectionEnabled'],

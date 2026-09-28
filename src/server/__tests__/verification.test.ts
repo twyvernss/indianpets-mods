@@ -67,6 +67,9 @@ function harness(
 async function tokenFor(h: Harness): Promise<string> {
   const outcome = await h.service.begin(POST_ID);
   if (outcome.kind !== 'ready') throw new Error(`expected ready, got ${outcome.kind}`);
+  // `begin` may read the post and author to build the moderator context line.
+  // Clear the log so call-ordering assertions describe the verify action alone.
+  h.reddit.calls.length = 0;
   return outcome.token;
 }
 
@@ -108,9 +111,42 @@ describe('begin', () => {
 
   it('makes no Reddit write calls', async () => {
     const h = harness();
-    await tokenFor(h);
+    const outcome = await h.service.begin(POST_ID);
+    expect(outcome.kind).toBe('ready');
     expect(h.reddit.calls).not.toContain('approve');
     expect(h.reddit.calls).not.toContain('comment');
+    expect(h.reddit.calls).not.toContain('modNote');
+  });
+
+  it('builds the moderator context line from the author and the automod hold', async () => {
+    const h = harness({ author: { username: 'op_user', accountAgeDays: 400, karma: 5200 } });
+    await h.repo.recordAutomodHold(POST_ID, NOW - 3_600_000, NOW);
+
+    const outcome = await h.service.begin(POST_ID);
+    if (outcome.kind !== 'ready') throw new Error('expected ready');
+
+    expect(outcome.authorSummary).toContain('u/op_user');
+    expect(outcome.authorSummary).toContain('1y');
+    expect(outcome.authorSummary).toContain('5.2k karma');
+    expect(outcome.authorSummary).toContain('held');
+  });
+
+  it('omits the context line when the setting is off, and skips the lookups', async () => {
+    const h = harness({}, { showAuthorSummary: false });
+
+    const outcome = await h.service.begin(POST_ID);
+    if (outcome.kind !== 'ready') throw new Error('expected ready');
+
+    expect(outcome.authorSummary).toBeNull();
+    expect(h.reddit.calls).not.toContain('getAuthor');
+  });
+
+  it('still opens the form when the author lookup fails', async () => {
+    const h = harness({ author: null });
+
+    const outcome = await h.service.begin(POST_ID);
+    expect(outcome.kind).toBe('ready');
+    if (outcome.kind === 'ready') expect(outcome.authorSummary).toBeNull();
   });
 
   it('refuses a post that is already verified', async () => {

@@ -2,6 +2,7 @@ import type { TaskRequest, TaskResponse } from '@devvit/web/server';
 import { Hono } from 'hono';
 import { getContainer } from '../container.js';
 import { describeError } from '../lib/logger.js';
+import { asPostId } from '../data/tokenRepo.js';
 import { isDuplicateFinding } from '../services/duplicates.js';
 
 export const jobs = new Hono();
@@ -74,6 +75,37 @@ jobs.post('/duplicate-report', async (c) => {
     await duplicates.report(finding);
   } catch (error) {
     log.error('duplicate report job failed', { reason: describeError(error) });
+  }
+
+  return c.json<TaskResponse>({}, 200);
+});
+
+/**
+ * Posts the "here is what we need from you" reply on a fundraiser that
+ * AutoModerator has just held.
+ *
+ * Runs here rather than on the trigger because it costs two Reddit round trips,
+ * and because a short delay lets AutoModerator's own comment land first.
+ */
+jobs.post('/automod-reply', async (c) => {
+  const { log, intake } = getContainer();
+
+  try {
+    const request = await c.req.json<TaskRequest>();
+    const postId = asPostId(String(request.data?.['postId'] ?? ''));
+    const rawAuthor = request.data?.['author'];
+
+    if (!postId) {
+      log.warn('automod-reply job carried an unusable post id');
+      return c.json<TaskResponse>({}, 200);
+    }
+
+    await intake.postReply({
+      postId,
+      author: typeof rawAuthor === 'string' && rawAuthor.length > 0 ? rawAuthor : null,
+    });
+  } catch (error) {
+    log.error('automod reply job failed', { reason: describeError(error) });
   }
 
   return c.json<TaskResponse>({}, 200);

@@ -230,3 +230,74 @@ function applyPlaceholders(
 function truncate(value: string, maxLength: number): string {
   return value.length <= maxLength ? value : `${value.slice(0, maxLength - 1)}…`;
 }
+
+/**
+ * The reply posted to an OP when AutoModerator holds their fundraiser.
+ *
+ * It must read as helpful, not accusatory - the overwhelming majority of these
+ * posts are genuine people with a sick animal. It says what is needed, where to
+ * send it, and what happens next. It never promises a timeframe.
+ */
+export function buildIntakeComment(input: {
+  subredditName: string;
+  authorName: string | null;
+}): string {
+  const greeting = input.authorName ? `u/${input.authorName}` : 'Hi there';
+
+  return [
+    `${greeting} — your post is held for review while the r/${input.subredditName} mod team checks the details. This is routine for every fundraiser here and is not an accusation.`,
+    '',
+    '**To get it approved, please [send us a modmail]' +
+      `(https://www.reddit.com/message/compose?to=/r/${input.subredditName}) with:**`,
+    '',
+    '1. The vet bill or treatment estimate, showing the clinic name and your name.',
+    '2. A photo of the animal together with a handwritten note showing your Reddit username and today’s date.',
+    '3. The clinic’s phone number, so we can confirm the treatment.',
+    '4. The fundraiser link, and who receives the money.',
+    '',
+    'Please **do not** post these documents publicly — they usually contain your address and phone number. Send them by modmail only.',
+    '',
+    'Once we have checked them, your post is approved automatically and a verification notice is added to it.',
+    '',
+    '---',
+    '',
+    `^(Automated message from the r/${input.subredditName} moderator team's bot. Reply by modmail, not here.)`,
+  ].join('\n');
+}
+
+/** Applies a subreddit's custom intake wording, or the built-in default. */
+export function renderIntakeComment(input: {
+  custom: string;
+  subredditName: string;
+  authorName: string | null;
+}): string {
+  if (input.custom.trim().length > 0) {
+    return input.custom
+      .replaceAll('{subreddit}', input.subredditName)
+      .replaceAll('{op}', input.authorName ? `u/${input.authorName}` : 'Hi there');
+  }
+  return buildIntakeComment(input);
+}
+
+/**
+ * One-line author summary shown to the moderator on the verify form.
+ *
+ * Shown to MODERATORS only, never published. It is context for a human
+ * decision, deliberately not a score and not a recommendation.
+ */
+export function formatAuthorSummary(input: {
+  username: string;
+  accountAgeDays: number;
+  karma: number;
+  heldAtLabel: string | null;
+}): string {
+  const age =
+    input.accountAgeDays >= 365
+      ? `${Math.floor(input.accountAgeDays / 365)}y`
+      : `${input.accountAgeDays}d`;
+  const karma =
+    input.karma >= 1000 ? `${(input.karma / 1000).toFixed(1)}k` : String(input.karma);
+
+  const held = input.heldAtLabel ? ` · held ${input.heldAtLabel}` : '';
+  return `u/${input.username} · account ${age} · ${karma} karma${held}`;
+}

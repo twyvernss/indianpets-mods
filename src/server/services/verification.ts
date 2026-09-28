@@ -8,7 +8,7 @@ import type { Logger } from '../lib/logger.js';
 import { describeError } from '../lib/logger.js';
 import { formatDisplayDate } from '../lib/time.js';
 import type { SettingsReader } from '../settings.js';
-import { buildModNote, buildVerificationComment } from '../text.js';
+import { buildModNote, buildVerificationComment, formatAuthorSummary } from '../text.js';
 import type {
   ChecklistItem,
   ChecklistItemResult,
@@ -19,7 +19,12 @@ import type { ModeratorGate } from './moderator.js';
 import type { RedditPort } from './redditPort.js';
 
 export type BeginOutcome =
-  | { kind: 'ready'; token: string }
+  /**
+   * `authorSummary` is a moderator-only one-liner (account age, karma, when
+   * AutoModerator held the post) shown on the form. Null when the setting is
+   * off or the author cannot be read.
+   */
+  | { kind: 'ready'; token: string; authorSummary: string | null }
   | { kind: 'already-verified'; record: VerificationRecord }
   | { kind: 'not-moderator' }
   | { kind: 'not-a-post' }
@@ -157,14 +162,13 @@ export function createVerificationService(deps: VerificationDeps): VerificationS
         return { kind: 'already-verified', record: existing };
       }
 
-      const token = await tokens.mint({
-        postId,
-        modName: username,
-        createdAtMs: now(),
-        checklist: null,
-      });
+      const [token, authorSummary] = await Promise.all([
+        tokens.mint({ postId, modName: username, createdAtMs: now(), checklist: null }),
+        config.showAuthorSummary ? buildAuthorSummary(postId) : Promise.resolve(null),
+      ]);
+
       log.info('verification started', { postId, mod: username });
-      return { kind: 'ready', token };
+      return { kind: 'ready', token, authorSummary };
     },
 
     async openChecklist({ token, contextPostId }): Promise<ChecklistOutcome> {
@@ -259,6 +263,39 @@ export function createVerificationService(deps: VerificationDeps): VerificationS
       return { kind: 'none' };
     },
   };
+
+  /**
+   * Builds the moderator-only context line for the verify form.
+   *
+   * Best-effort by design: this is a convenience, and a slow or failing user
+   * lookup must never stop a moderator verifying a fundraiser. Anything that
+   * goes wrong returns null and the form simply omits the line.
+   *
+   * Costs two sequential Reddit round trips, which is why it sits behind the
+   * `showAuthorSummary` setting.
+   */
+  async function buildAuthorSummary(postId: T3): Promise<string | null> {
+    try {
+      const [post, heldAtMs] = await Promise.all([
+        reddit.getPost(postId),
+        repo.getAutomodHold(postId),
+      ]);
+      if (!post?.authorName) return null;
+
+      const author = await reddit.getAuthor(post.authorName);
+      if (!author) return null;
+
+      return formatAuthorSummary({
+        username: author.username,
+        accountAgeDays: author.accountAgeDays,
+        karma: author.karma,
+        heldAtLabel: heldAtMs === null ? null : formatVerifiedDate(heldAtMs),
+      });
+    } catch (error) {
+      log.warn('author summary unavailable', { postId, reason: describeError(error) });
+      return null;
+    }
+  }
 
   /**
    * Turns `{ item0: true, item2: true }` into labelled results.

@@ -37,15 +37,21 @@ function parseIsoMs(value: unknown, fallbackMs: number): number {
  * has not been verified yet.
  */
 triggers.post('/automod-filter-post', async (c) => {
-  const { log, repo } = getContainer();
+  const { log, intake } = getContainer();
 
   try {
     const body = await c.req.json<OnAutomoderatorFilterPostRequest>();
     const postId = asPostId(body.post?.id ?? '');
 
     if (postId) {
-      const nowMs = Date.now();
-      await repo.recordAutomodHold(postId, parseIsoMs(body.removedAt, nowMs), nowMs);
+      await intake.onAutomodHold({
+        postId,
+        // This payload's `author` is the author's USER ID (t2_...) rather than
+        // a username, and a user id is useless in a comment. The reply job
+        // reads the username from the post itself instead.
+        author: null,
+        heldAtMs: parseIsoMs(body.removedAt, Date.now()),
+      });
       log.info('automod filtered a post', { postId });
     }
   } catch (error) {

@@ -31,6 +31,8 @@ import { KEY_PREFIX } from '../config.js';
  *   fv:tok:{token}       STRING  JSON VerificationToken, TTL 15 min.
  *   fv:mod:{username}    STRING  "1" | "0", TTL 300s / 60s.
  *   fv:held:{postId}     STRING  Epoch ms AutoModerator filtered the post.
+ *   fv:areply:{postId}   STRING  "1", TTL 30d. Marks that the intake reply has
+ *                                already been posted for this post.
  *
  * DUPLICATE LINK DETECTION
  *   fv:link:{linkKey}    STRING  JSON LinkRecord - the FIRST post seen with
@@ -55,6 +57,7 @@ export const keys = {
   token: (token: string): string => `${KEY_PREFIX}:tok:${token}`,
   moderator: (username: string): string => `${KEY_PREFIX}:mod:${username.toLowerCase()}`,
   automodHold: (postId: T3): string => `${KEY_PREFIX}:held:${postId}`,
+  automodReplied: (postId: T3): string => `${KEY_PREFIX}:areply:${postId}`,
 
   link: (linkKey: string): string => `${KEY_PREFIX}:link:${linkKey}`,
   postLinks: (postId: T3): string => `${KEY_PREFIX}:plinks:${postId}`,

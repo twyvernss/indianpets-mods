@@ -24,6 +24,13 @@ No moderator's personal account ever appears on the post.
 - An optional, subreddit-editable checklist. Nothing in it blocks submission.
 - Running it twice never produces a second comment.
 
+**Intake (v3)**
+- When AutoModerator holds a fundraiser, the app can reply to the OP listing exactly what to send
+  and telling them to send it by modmail, not publicly. **Off by default** — if AutoModerator
+  already posts something similar, remove that first.
+- The verify form shows the moderator a one-line context header: the author's account age, karma,
+  and when the post was held.
+
 **Duplicate fundraiser links (v2)**
 - Every new post is scanned for links. Ketto, Milaap, GoFundMe, ImpactGuru, Donatekart, Give and
   FuelADream URLs are reduced to a `platform:campaign` identity, so the same campaign matches even
@@ -186,6 +193,9 @@ Layer 1 wins over layer 2, which wins over the built-in defaults.
 | Name the verifying moderator in the public comment | **off** | Leave this off. Turning it on puts a moderator's username on the post, which is exactly what causes the unsolicited DMs this app exists to prevent. |
 | Checklist items | built-in list | One item per line. Markdown bullets are tolerated. Max 20 items, 120 characters each. |
 | Custom verification notice | blank | Replaces the built-in comment. Supports `{subreddit}`, `{date}`, `{mod}`. Keep the "not a guarantee" and "donate at your own discretion" language. |
+| Reply when AutoModerator holds a fundraiser | **off** | Posts the "here is what we need" comment to the OP. Turn on only after removing any equivalent AutoModerator comment. |
+| Custom intake wording | blank | Supports `{subreddit}`, `{op}`. |
+| Show author age/karma on the verify form | on | Moderator-only context line. Costs one extra lookup when opening the form. |
 | Detect repeated fundraiser links | on | Reports repeats to the modqueue. |
 | Report same-author reposts | on | Off means they are logged only. |
 | Scan comments for links | **off** | Much more traffic for a comparatively rare signal. |
@@ -217,6 +227,7 @@ fields of a hash, which would force one call per record.
 | `fv:tok:{token}` | string | 15 min | Server-minted proof that a given moderator opened the form for a given post, plus the checklist they were shown. |
 | `fv:mod:{username}` | string | 300s / 60s | Cached moderator check. Positives cached longer than negatives. |
 | `fv:held:{postId}` | string | 30d | When AutoModerator filtered the post. |
+| `fv:areply:{postId}` | string | 30d | Marks that the intake reply has been claimed, so a redelivered trigger cannot post it twice. |
 | `fv:cfg` | string | none | Runtime settings overrides written by the in-Reddit settings form. |
 | `fv:link:{linkKey}` | string | ~1y | The first post seen carrying a normalised link. Claimed with `nx`, so the first writer wins a race. |
 | `fv:plinks:{postId}` | string | ~1y | The link keys a post owns, so deleting it releases them. |
@@ -234,7 +245,7 @@ src/server/
   settings.ts         three-layer settings resolution, coercion and clamping
   types.ts            domain types
   handlers/           menu, forms, triggers, scheduler - thin adapters, no business logic
-  services/           verification, duplicates, reminders, moderator gate, Reddit port + adapter
+  services/           verification, duplicates, reminders, intake, moderator gate, Reddit port + adapter
   data/               all Redis access: keys, records, links, tokens, config overrides
   lib/                logger, retry, sanitisation, URL normalisation, hashing, dates
   __tests__/          unit tests with in-memory fakes
@@ -304,8 +315,8 @@ npm run test:types
 npm run check
 ```
 
-127 tests across pure logic (sanitisation, dates, retry classification, settings resolution and
-clamping, checklist parsing, comment wording, URL normalisation, hashing) and the three services
+144 tests across pure logic (sanitisation, dates, retry classification, settings resolution and
+clamping, checklist parsing, comment wording, URL normalisation, hashing) and the four services
 against in-memory fakes: idempotency, concurrent runs, expired and mismatched tokens, missing posts,
 deleted authors, v1→v2 record migration, every partial-failure path, duplicate races, link release
 on deletion, batching and chain limits, and the OP-reply shortcut.
@@ -316,6 +327,11 @@ service layer, which is tested; the handlers are exercised during playtest.
 
 ## Not built
 
-- Auto-replying to the OP when AutoModerator holds a fundraiser, listing the documents needed.
-- An account age/karma summary shown on held fundraisers. (The thresholds exist as settings and
-  currently only annotate modqueue reports.)
+- Repeat-fundraiser tracking (how many times one person has raised here, and when).
+- A public wiki index of verified fundraisers.
+- Outcome tracking: whether a fundraiser actually completed.
+
+## Test counts
+
+144 unit tests across six files. Everything below the HTTP handlers is covered; the handlers
+themselves are exercised during playtest.

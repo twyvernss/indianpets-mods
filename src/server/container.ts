@@ -10,6 +10,8 @@ import type { Logger } from './lib/logger.js';
 import { createLogger } from './lib/logger.js';
 import type { DuplicateService } from './services/duplicates.js';
 import { createDuplicateService } from './services/duplicates.js';
+import type { IntakeService } from './services/intake.js';
+import { createIntakeService } from './services/intake.js';
 import type { ModeratorGate } from './services/moderator.js';
 import { createModeratorGate } from './services/moderator.js';
 import { createRedditAdapter, createSchedulerAdapter } from './services/redditAdapter.js';
@@ -40,6 +42,7 @@ export type Container = {
   verification: VerificationService;
   duplicates: DuplicateService;
   reminders: ReminderService;
+  intake: IntakeService;
 };
 
 let instance: Container | null = null;
@@ -82,7 +85,26 @@ export function getContainer(): Container {
 
   const duplicates = createDuplicateService({ links, reddit, scheduler, settings, log, now });
   const reminders = createReminderService({ repo, reddit, scheduler, settings, log, now });
+  const intake = createIntakeService({
+    redis: redisPort,
+    reddit,
+    scheduler,
+    settings,
+    log,
+    now,
+    newId: () => globalThis.crypto.randomUUID(),
+  });
 
-  instance = { log, repo, config, settings, gate, verification, duplicates, reminders };
+  instance = {
+    log,
+    repo,
+    config,
+    settings,
+    gate,
+    verification,
+    duplicates,
+    reminders,
+    intake,
+  };
   return instance;
 }
