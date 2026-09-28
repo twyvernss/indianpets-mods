@@ -36,6 +36,16 @@ export type VerificationRepo = {
   acquireLock(postId: T3, ownerToken: string, nowMs: number): Promise<boolean>;
   releaseLock(postId: T3, ownerToken: string): Promise<void>;
 
+  /**
+   * Every fundraiser this app has verified for a given person, newest first.
+   *
+   * Kept deliberately content-free (a post id and a timestamp) and NOT erased
+   * when a post is deleted: it records what the moderator team did, in the same
+   * spirit as a mod note, and is the only way to see that someone has raised
+   * here before and then removed the evidence.
+   */
+  getAuthorHistory(username: string, limit: number): Promise<{ postId: T3; verifiedAtMs: number }[]>;
+
   recordAutomodHold(postId: T3, heldAtMs: number, nowMs: number): Promise<void>;
   getAutomodHold(postId: T3): Promise<number | null>;
 };
@@ -171,18 +181,37 @@ export function createVerificationRepo(redis: RedisPort): VerificationRepo {
       // The record must land before the indexes: an index entry pointing at a
       // missing record is a harder state to reason about than the reverse.
       await write(record);
-      await Promise.all([
+
+      const writes = [
         redis.zAdd(keys.verifiedIndex(), { member: record.postId, score: record.verifiedAtMs }),
         redis.zAdd(keys.openIndex(), { member: record.postId, score: record.verifiedAtMs }),
-      ]);
+      ];
+      if (record.authorName) {
+        writes.push(
+          redis.zAdd(keys.authorHistory(record.authorName), {
+            member: record.postId,
+            score: record.verifiedAtMs,
+          }),
+        );
+      }
+      await Promise.all(writes);
     },
 
+
+
     async remove(postId) {
-      await Promise.all([
+      // A rolled-back verification never happened, so it must not leave a trace
+      // in the author's history either.
+      const existing = await read(postId);
+      const removals = [
         redis.del(keys.record(postId)),
         redis.zRem(keys.verifiedIndex(), [postId]),
         redis.zRem(keys.openIndex(), [postId]),
-      ]);
+      ];
+      if (existing?.authorName) {
+        removals.push(redis.zRem(keys.authorHistory(existing.authorName), [postId]));
+      }
+      await Promise.all(removals);
     },
 
     async markDeleted(postId, deletedAtMs) {
@@ -244,6 +273,18 @@ export function createVerificationRepo(redis: RedisPort): VerificationRepo {
       const key = keys.lock(postId);
       // Only release a lock we still own; otherwise the TTL handles it.
       if ((await redis.get(key)) === ownerToken) await redis.del(key);
+    },
+
+    async getAuthorHistory(username, limit) {
+      const entries = await redis.zRange(keys.authorHistory(username), 0, Number.MAX_SAFE_INTEGER, {
+        by: 'score',
+        reverse: true,
+        limit: { offset: 0, count: limit },
+      });
+      return entries.map((entry) => ({
+        postId: entry.member as T3,
+        verifiedAtMs: entry.score,
+      }));
     },
 
     async recordAutomodHold(postId, heldAtMs, nowMs) {

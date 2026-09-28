@@ -34,3 +34,10 @@ export function formatDisplayDate(epochMs: number, offsetMinutes: number, label:
 export function daysBetween(fromMs: number, toMs: number): number {
   return Math.max(0, Math.floor((toMs - fromMs) / 86_400_000));
 }
+
+/** Compact date for dense moderator-facing lines, e.g. "4 Aug 2026". */
+export function formatShortDate(epochMs: number, offsetMinutes = 330): string {
+  const shifted = new Date(epochMs + offsetMinutes * 60_000);
+  const month = MONTHS[shifted.getUTCMonth()] ?? '???';
+  return `${shifted.getUTCDate()} ${month} ${shifted.getUTCFullYear()}`;
+}

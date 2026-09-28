@@ -31,6 +31,11 @@ export type AppSettings = {
   customNoticeText: string;
   /** Moderator-editable tick-boxes, already parsed and bounded. */
   checklistItems: ChecklistItem[];
+  /**
+   * Render the checklist as one multi-select tick-list rather than a row of
+   * toggles. Keeps the verify form short, which matters most on mobile.
+   */
+  compactChecklist: boolean;
 
   /**
    * Reply to the OP when AutoModerator holds their fundraiser, telling them
@@ -81,6 +86,7 @@ export const OVERRIDABLE_KEYS = [
   'showVerifyingModInComment',
   'customNoticeText',
   'checklistItems',
+  'compactChecklist',
   'automodReplyEnabled',
   'automodReplyText',
   'showAuthorSummary',
@@ -106,6 +112,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   showVerifyingModInComment: false,
   customNoticeText: '',
   checklistItems: toChecklistItems(DEFAULT_CHECKLIST_LABELS),
+  compactChecklist: true,
   automodReplyEnabled: false,
   automodReplyText: '',
   showAuthorSummary: true,
@@ -198,6 +205,7 @@ export function parseSettings(raw: Record<string, unknown>): AppSettings {
     ),
     customNoticeText: coerceString(raw['customNoticeText'], DEFAULT_SETTINGS.customNoticeText),
     checklistItems: parseChecklistItems(raw['checklistItems']),
+    compactChecklist: coerceBoolean(raw['compactChecklist'], DEFAULT_SETTINGS.compactChecklist),
     automodReplyEnabled: coerceBoolean(
       raw['automodReplyEnabled'],
       DEFAULT_SETTINGS.automodReplyEnabled,

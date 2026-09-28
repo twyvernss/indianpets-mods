@@ -16,7 +16,6 @@ import { triggers } from './handlers/triggers.js';
  *   /internal/menu/verification-status        menu.items[1]
  *   /internal/menu/settings                   menu.items[2]
  *   /internal/form/verify-submit              forms.verifyForm
- *   /internal/form/checklist-submit           forms.checklistForm
  *   /internal/form/settings-submit            forms.settingsForm
  *   /internal/triggers/automod-filter-post    triggers.onAutomoderatorFilterPost
  *   /internal/triggers/post-submit            triggers.onPostSubmit

@@ -45,6 +45,12 @@ export const CONFIG = {
   /** Upper bound on the stored internal note. Generous but bounded. */
   noteMaxLength: 500,
 
+  /**
+   * How many previous verifications to fetch for the author summary. Bounded so
+   * a prolific poster cannot make opening the form slow.
+   */
+  authorHistoryLimit: 10,
+
   /** Guard rails on the moderator-configurable checklist. */
   maxChecklistItems: 20,
   checklistLabelMaxLength: 120,

@@ -21,7 +21,10 @@ No moderator's personal account ever appears on the post.
 
 **Verification (v1)**
 - One menu action approves the post, posts the stickied mod-team notice, and records the result.
-- An optional, subreddit-editable checklist. Nothing in it blocks submission.
+- An optional, subreddit-editable checklist, shown **in the same form**. Nothing in it blocks
+  submission, so a moderator can just press Verify.
+- The form opens with the author's history: account age, karma, when AutoModerator held the post,
+  and how many fundraisers this person has had verified here before.
 - Running it twice never produces a second comment.
 
 **Intake (v3)**
@@ -130,13 +133,12 @@ streams logs. You can pin a default subreddit by adding this to `devvit.json`:
 
 1. Make a text post on the test sub, then remove it (to imitate the AutoModerator hold).
 2. Open the post's `...` menu → **Verify fundraiser**. The form should appear.
-3. Submit with the checklist toggle **off**. Expect: post approved, a stickied comment from the app
-   account with the green MOD tag, and a success toast.
+3. Tick whatever applies in the checklist (or nothing) and press Verify. Expect: post approved, a
+   stickied comment from the app account with the green MOD tag, and a success toast.
 4. Run **Verify fundraiser** again on the same post. Expect: "Already verified by u/…" and **no
    second comment**. This is the idempotency guarantee.
 5. Run **Fundraiser verification status**. Expect the same details echoed back.
-6. Repeat on a fresh post with the checklist toggle **on** — you should get a second form, and the
-   note you typed on step one should be pre-filled.
+6. Check the form header shows the author's account age, karma and previous-fundraiser count.
 7. From the subreddit's `...` menu, open **Fundraiser tools settings**, change something, save, and
    confirm the change took effect on the next action.
 8. Post two different posts containing the same Ketto/Milaap URL **from two different accounts**.
@@ -201,6 +203,7 @@ Layer 1 wins over layer 2, which wins over the built-in defaults.
 | Add a mod note on the OP | on | Records who verified and when. Skipped if the poster's account is deleted. |
 | Name the verifying moderator in the public comment | **off** | Leave this off. Turning it on puts a moderator's username on the post, which is exactly what causes the unsolicited DMs this app exists to prevent. |
 | Checklist items | built-in list | One item per line. Markdown bullets are tolerated. Max 20 items, 120 characters each. |
+| Compact checklist | on | One multi-select tick-list instead of a row of toggles. Keeps the form short, which matters on mobile. |
 | Custom verification notice | blank | Replaces the built-in comment. Supports `{subreddit}`, `{date}`, `{mod}`. Keep the "not a guarantee" and "donate at your own discretion" language. |
 | Reply when AutoModerator holds a fundraiser | **off** | Posts the "here is what we need" comment to the OP. Turn on only after removing any equivalent AutoModerator comment. |
 | Custom intake wording | blank | Supports `{subreddit}`, `{op}`. |
@@ -238,6 +241,7 @@ fields of a hash, which would force one call per record.
 | `fv:mod:{username}` | string | 300s / 60s | Cached moderator check. Positives cached longer than negatives. |
 | `fv:held:{postId}` | string | 30d | When AutoModerator filtered the post. |
 | `fv:areply:{postId}` | string | 30d | Marks that the intake reply has been claimed, so a redelivered trigger cannot post it twice. |
+| `fv:auth:{username}` | zset | none | Every fundraiser verified for this person. **Survives post deletion** — see below. |
 | `fv:cfg` | string | none | Runtime settings overrides written by the in-Reddit settings form. |
 | `fv:link:{linkKey}` | string | ~1y | The first post seen carrying a normalised link. Claimed with `nx`, so the first writer wins a race. |
 | `fv:plinks:{postId}` | string | ~1y | The link keys a post owns, so deleting it releases them. |
@@ -265,12 +269,27 @@ Handlers and services depend on **ports** (`RedisPort`, `RedditPort`, `Scheduler
 `SettingsPort`, `ConfigRepo`), never on `@devvit/web/server` directly. That is what lets the tests
 run outside the Devvit runtime.
 
-### Why the checklist is a second form
+### Why the verify flow is one form
 
-Devvit forms cannot show or hide fields conditionally — progressive disclosure only happens between
-submissions. Ticking "Fill in the verification checklist" on form one opens form two. The
-alternative, a second menu item, was rejected because it clutters every post's menu for a path used
-less often.
+Devvit forms cannot show or hide fields conditionally, so a "show checklist" toggle can only open a
+*second* form. Every checklist item is optional anyway, so the checklist simply lives in the same
+box: tick what applies, press Verify once.
+
+Devvit has no true checkbox field. `boolean` renders as a toggle switch, so the default is a single
+multi-select, which is the closest thing to a tick-list and keeps the form short. Set **Compact
+checklist** off if you prefer a row of toggles.
+
+**Button placement is not ours to control.** Reddit draws Verify/Cancel at the end of the form's own
+scroll, and an app cannot pin them. The only lever is form length, which is exactly why the compact
+checklist is the default.
+
+### Author history and deletion
+
+`fv:auth:{username}` holds a post id and a timestamp per verification, and is **not** erased when a
+post is deleted. It records what the moderator team did — the same thing a mod note records, and
+Reddit keeps those too. It holds no post content: the body, notes, checklist answers and author name
+on the verification record itself are all scrubbed on deletion as before. This is what lets a
+moderator see that someone has raised here before and since removed the evidence.
 
 ### Ordering inside the verify action
 

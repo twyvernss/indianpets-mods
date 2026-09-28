@@ -34,6 +34,13 @@ import { KEY_PREFIX } from '../config.js';
  *   fv:areply:{postId}   STRING  "1", TTL 30d. Marks that the intake reply has
  *                                already been posted for this post.
  *
+ *   fv:auth:{username}   ZSET    member = postId, score = verifiedAtMs.
+ *                                Every fundraiser this app has verified for
+ *                                this person. SURVIVES post deletion on
+ *                                purpose: it is a log of moderator actions,
+ *                                like a mod note, and holds no post content -
+ *                                only an id and a timestamp.
+ *
  * DUPLICATE LINK DETECTION
  *   fv:link:{linkKey}    STRING  JSON LinkRecord - the FIRST post seen with
  *                                this normalised link. TTL ~1 year. Written
@@ -58,6 +65,7 @@ export const keys = {
   moderator: (username: string): string => `${KEY_PREFIX}:mod:${username.toLowerCase()}`,
   automodHold: (postId: T3): string => `${KEY_PREFIX}:held:${postId}`,
   automodReplied: (postId: T3): string => `${KEY_PREFIX}:areply:${postId}`,
+  authorHistory: (username: string): string => `${KEY_PREFIX}:auth:${username.toLowerCase()}`,
 
   link: (linkKey: string): string => `${KEY_PREFIX}:link:${linkKey}`,
   postLinks: (postId: T3): string => `${KEY_PREFIX}:plinks:${postId}`,

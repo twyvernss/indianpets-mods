@@ -4,12 +4,12 @@ import { Hono } from 'hono';
 import { CONFIG } from '../config.js';
 import { getContainer } from '../container.js';
 import { asPostId } from '../data/tokenRepo.js';
-import { checklistFormResponse } from '../formDefinitions.js';
+import { CHECKLIST_FIELD } from '../formDefinitions.js';
 import { describeError } from '../lib/logger.js';
 import { sanitizeText, toBoolean, toNonEmptyString } from '../lib/sanitize.js';
 import { pickOverrides } from '../settings.js';
 import { TOASTS } from '../text.js';
-import type { ChecklistFormValues, VerifyFormValues } from '../types.js';
+import type { VerifyFormValues } from '../types.js';
 import { toastFor, UNEXPECTED_ERROR } from './responses.js';
 
 export const forms = new Hono();
@@ -20,74 +20,54 @@ function contextPostId(): T3 | null {
 }
 
 /**
- * Step one: note + "fill in the checklist?".
+ * Reads the checklist answers out of the submitted form.
  *
- * Either opens the checklist form or performs the verification immediately.
- * The quick path ends here, which is the whole point of the design.
+ * The verify form renders the checklist one of two ways, so both shapes are
+ * accepted:
+ *  - compact: a single multi-select, whose value is an array of item ids;
+ *  - toggles: one boolean field per item, named `item0`, `item1`, ...
+ *
+ * Returns null when nothing was ticked, which the service treats as "the
+ * moderator used the quick path" rather than "every item was answered no".
+ */
+function readChecklistAnswers(body: Record<string, unknown>): Record<string, boolean> | null {
+  const answers: Record<string, boolean> = {};
+
+  const selected = body[CHECKLIST_FIELD];
+  if (Array.isArray(selected)) {
+    for (const value of selected) {
+      if (typeof value === 'string' && /^item\d+$/u.test(value)) answers[value] = true;
+    }
+  }
+
+  for (const [key, value] of Object.entries(body)) {
+    // Only positional checklist ids; never `token`, `note` or anything else.
+    if (/^item\d+$/u.test(key) && toBoolean(value)) answers[key] = true;
+  }
+
+  return Object.keys(answers).length > 0 ? answers : null;
+}
+
+/**
+ * The one and only verify form submission.
+ *
+ * Note and checklist arrive together, so a moderator presses Verify once.
  */
 forms.post('/verify-submit', async (c) => {
   const { log, verification } = getContainer();
 
   try {
-    const body = await c.req.json<VerifyFormValues>();
-    const note = sanitizeText(body.note, CONFIG.noteMaxLength);
-    const token = toNonEmptyString(body.token);
-
-    if (toBoolean(body.showChecklist)) {
-      const opened = await verification.openChecklist({ token, contextPostId: contextPostId() });
-
-      if (opened.kind === 'ready') {
-        return c.json<UiResponse>(checklistFormResponse(opened.token, note, opened.items));
-      }
-      return c.json<UiResponse>({
-        showToast: {
-          text: opened.kind === 'expired' ? TOASTS.expired : TOASTS.notModerator,
-          appearance: 'neutral',
-        },
-      });
-    }
-
-    const outcome = await verification.complete({
-      token,
-      contextPostId: contextPostId(),
-      note,
-      checklistAnswers: null,
-    });
-    return c.json<UiResponse>(toastFor(outcome));
-  } catch (error) {
-    log.error('verify-submit failed', { reason: describeError(error) });
-    return c.json<UiResponse>(UNEXPECTED_ERROR);
-  }
-});
-
-/**
- * Step two: the optional checklist.
- *
- * Tick-box names are dynamic (the list is subreddit-configurable), so the raw
- * answers are collected here and paired with their labels inside the service,
- * using the list recorded against the token.
- */
-forms.post('/checklist-submit', async (c) => {
-  const { log, verification } = getContainer();
-
-  try {
-    const body = await c.req.json<ChecklistFormValues>();
-
-    const answers: Record<string, boolean> = {};
-    for (const [key, value] of Object.entries(body)) {
-      // Only positional checklist ids; never `token`, `note` or anything else.
-      if (/^item\d+$/u.test(key)) answers[key] = toBoolean(value);
-    }
+    const body = await c.req.json<VerifyFormValues & Record<string, unknown>>();
 
     const outcome = await verification.complete({
       token: toNonEmptyString(body.token),
       contextPostId: contextPostId(),
       note: sanitizeText(body.note, CONFIG.noteMaxLength),
-      checklistAnswers: answers,
+      checklistAnswers: readChecklistAnswers(body),
     });
     return c.json<UiResponse>(toastFor(outcome));
   } catch (error) {
-    log.error('checklist-submit failed', { reason: describeError(error) });
+    log.error('verify-submit failed', { reason: describeError(error) });
     return c.json<UiResponse>(UNEXPECTED_ERROR);
   }
 });

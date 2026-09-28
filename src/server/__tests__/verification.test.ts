@@ -228,24 +228,30 @@ describe('complete - happy path', () => {
 });
 
 describe('checklist', () => {
+  it('is offered on the verify form itself, not behind a second step', async () => {
+    const h = harness();
+    const outcome = await h.service.begin(POST_ID);
+    if (outcome.kind !== 'ready') throw new Error('expected ready');
+
+    expect(outcome.items.length).toBeGreaterThan(0);
+    expect(outcome.compactChecklist).toBe(true);
+  });
+
   it('stores the labels that were shown, not just the answers', async () => {
     const h = harness();
-    const token = await tokenFor(h);
-
-    const opened = await h.service.openChecklist({ token, contextPostId: null });
-    expect(opened.kind).toBe('ready');
-    if (opened.kind !== 'ready') return;
+    const outcome = await h.service.begin(POST_ID);
+    if (outcome.kind !== 'ready') throw new Error('expected ready');
 
     await h.service.complete({
-      token: opened.token,
+      token: outcome.token,
       contextPostId: null,
       note: '',
-      checklistAnswers: { [opened.items[0]?.id ?? 'item0']: true, item2: true },
+      checklistAnswers: { item0: true, item2: true },
     });
 
     const record = await h.repo.get(POST_ID);
-    expect(record?.checklist).toHaveLength(opened.items.length);
-    expect(record?.checklist?.[0]).toEqual({ label: opened.items[0]?.label, checked: true });
+    expect(record?.checklist).toHaveLength(outcome.items.length);
+    expect(record?.checklist?.[0]).toEqual({ label: outcome.items[0]?.label, checked: true });
     expect(record?.checklist?.[1]?.checked).toBe(false);
     expect(record?.checklist?.[2]?.checked).toBe(true);
   });
@@ -258,16 +264,12 @@ describe('checklist', () => {
       ],
     });
 
-    const opened = await h.service.openChecklist({
-      token: await tokenFor(h),
-      contextPostId: null,
-    });
-    expect(opened.kind).toBe('ready');
-    if (opened.kind !== 'ready') return;
-    expect(opened.items.map((item) => item.label)).toEqual(['Bill matches', 'Clinic called']);
+    const outcome = await h.service.begin(POST_ID);
+    if (outcome.kind !== 'ready') throw new Error('expected ready');
+    expect(outcome.items.map((item) => item.label)).toEqual(['Bill matches', 'Clinic called']);
 
     await h.service.complete({
-      token: opened.token,
+      token: outcome.token,
       contextPostId: null,
       note: '',
       checklistAnswers: { item1: true },
@@ -280,11 +282,83 @@ describe('checklist', () => {
     expect(h.reddit.lastModNote?.note).toContain('Checklist 1/2.');
   });
 
-  it('refuses to open the checklist for a non-moderator', async () => {
-    const h = harness({ currentUser: 'random_user', moderators: ['mod_one'] });
-    await expect(
-      h.service.openChecklist({ token: null, contextPostId: POST_ID }),
-    ).resolves.toEqual({ kind: 'not-moderator' });
+  it('treats an untouched checklist as the quick path', async () => {
+    const h = harness();
+    await h.service.complete({
+      token: await tokenFor(h),
+      contextPostId: null,
+      note: '',
+      checklistAnswers: null,
+    });
+
+    expect((await h.repo.get(POST_ID))?.checklist).toBeNull();
+  });
+
+  it('honours the setting that switches to toggle-style fields', async () => {
+    const h = harness({}, { compactChecklist: false });
+    const outcome = await h.service.begin(POST_ID);
+    if (outcome.kind !== 'ready') throw new Error('expected ready');
+    expect(outcome.compactChecklist).toBe(false);
+  });
+});
+
+describe('author history', () => {
+  it('counts previous verified fundraisers and survives their deletion', async () => {
+    const h = harness();
+
+    // Verify one fundraiser, then delete the post entirely.
+    await h.service.complete({
+      token: await tokenFor(h),
+      contextPostId: null,
+      note: 'first',
+      checklistAnswers: null,
+    });
+    await h.repo.markDeleted(POST_ID, NOW + 1000);
+
+    // The post content is gone...
+    const scrubbed = await h.repo.get(POST_ID);
+    expect(scrubbed?.authorName).toBeNull();
+    expect(scrubbed?.note).toBe('');
+
+    // ...but the fact that we verified a fundraiser for this person is not.
+    const history = await h.repo.getAuthorHistory('op_user', 10);
+    expect(history).toHaveLength(1);
+    expect(history[0]?.postId).toBe(POST_ID);
+  });
+
+  it('surfaces the history on the verify form for a later post', async () => {
+    const h = harness();
+    await h.service.complete({
+      token: await tokenFor(h),
+      contextPostId: null,
+      note: '',
+      checklistAnswers: null,
+    });
+
+    // A different post by the same author, same installation.
+    const outcome = await h.service.begin('t3_second');
+    if (outcome.kind !== 'ready') throw new Error('expected ready');
+
+    expect(outcome.authorSummary).toContain('1 previous verified');
+  });
+
+  it('says so plainly when there is no history', async () => {
+    const h = harness();
+    const outcome = await h.service.begin(POST_ID);
+    if (outcome.kind !== 'ready') throw new Error('expected ready');
+    expect(outcome.authorSummary).toContain('no previous fundraiser verified here');
+  });
+
+  it('drops the history entry when a verification is rolled back', async () => {
+    const h = harness({ failOn: { comment: new Error('THREAD_LOCKED') } });
+    await h.service.complete({
+      token: await tokenFor(h),
+      contextPostId: null,
+      note: '',
+      checklistAnswers: null,
+    });
+
+    expect(await h.repo.getAuthorHistory('op_user', 10)).toHaveLength(0);
   });
 });
 

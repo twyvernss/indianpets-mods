@@ -26,7 +26,14 @@ menu.post('/verify-fundraiser', async (c) => {
 
     switch (outcome.kind) {
       case 'ready':
-        return c.json<UiResponse>(verifyFormResponse(outcome.token, outcome.authorSummary));
+        return c.json<UiResponse>(
+          verifyFormResponse({
+            token: outcome.token,
+            authorSummary: outcome.authorSummary,
+            items: outcome.items,
+            compactChecklist: outcome.compactChecklist,
+          }),
+        );
 
       case 'already-verified':
         return c.json<UiResponse>({

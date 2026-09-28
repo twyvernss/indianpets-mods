@@ -1,4 +1,4 @@
-import type { UiResponse } from '@devvit/web/shared';
+import type { FormField, UiResponse } from '@devvit/web/shared';
 import { CONFIG } from './config.js';
 import type { AppSettings } from './settings.js';
 import { checklistItemsToText } from './settings.js';
@@ -8,28 +8,72 @@ import type { ChecklistItem } from './types.js';
 /**
  * Form definitions.
  *
- * Devvit forms CANNOT show or hide fields conditionally - progressive
- * disclosure only happens between submissions. That is why the checklist is a
- * separate, second form reached by ticking a box on the first one, rather than
- * a collapsible section of one form.
- *
- * The chosen shape keeps the common case fast: the quick path is a single form
- * with two fields, and a moderator who wants the checklist opts into one extra
- * step.
- *
- * `data` carries the verification token forward. Values in `data` that have no
- * matching field are echoed back to the submit endpoint, which is how the token
- * survives the round trip without being shown to the moderator.
+ * The verify flow is ONE form. Devvit cannot show or hide fields conditionally,
+ * so an earlier design put the checklist behind a "show checklist" toggle that
+ * opened a second form. Every checklist item is optional anyway, so simply
+ * showing them in the same box is both simpler and fewer taps: the moderator
+ * ticks whatever applies (or nothing) and presses Verify once.
  */
 
-export function verifyFormResponse(token: string, authorSummary: string | null): UiResponse {
-  // The author line is prepended to the description rather than added as a
+/** The field name used when the checklist is rendered as a single tick-list. */
+export const CHECKLIST_FIELD = 'checklist';
+
+/**
+ * Builds the checklist portion of the verify form.
+ *
+ * Two shapes, because Devvit has no true checkbox field:
+ *
+ *  - `compact` (default) renders ONE multi-select, which is the closest thing
+ *    Devvit offers to a tick-list and keeps the form short. Form length matters
+ *    on mobile: Reddit draws the Verify/Cancel buttons at the end of the form's
+ *    own scroll, and the app cannot pin them. A form that fits on screen is the
+ *    only lever we have.
+ *  - otherwise, one boolean per item, which Reddit renders as toggle switches.
+ */
+function checklistFields(items: readonly ChecklistItem[], compact: boolean): FormField[] {
+  if (items.length === 0) return [];
+
+  if (compact) {
+    return [
+      {
+        type: 'select',
+        name: CHECKLIST_FIELD,
+        label: FORM_TEXT.checklistTitle,
+        helpText: FORM_TEXT.checklistDescription,
+        multiSelect: true,
+        required: false,
+        options: items.map((item) => ({ label: item.label, value: item.id })),
+      },
+    ];
+  }
+
+  return [
+    {
+      type: 'group',
+      label: FORM_TEXT.checklistTitle,
+      helpText: FORM_TEXT.checklistDescription,
+      fields: items.map((item) => ({
+        type: 'boolean' as const,
+        name: item.id,
+        label: item.label,
+        defaultValue: false,
+      })),
+    },
+  ];
+}
+
+export function verifyFormResponse(input: {
+  token: string;
+  /** Moderator-only context line, or null. */
+  authorSummary: string | null;
+  items: readonly ChecklistItem[];
+  compactChecklist: boolean;
+}): UiResponse {
+  // The author line goes at the top of the description rather than in a
   // disabled field, because a disabled field still looks like something the
   // moderator is meant to fill in.
-  const description = authorSummary
-    ? `${authorSummary}
-
-${FORM_TEXT.verifyDescription}`
+  const description = input.authorSummary
+    ? `${input.authorSummary}\n\n${FORM_TEXT.verifyDescription}`
     : FORM_TEXT.verifyDescription;
 
   return {
@@ -41,72 +85,21 @@ ${FORM_TEXT.verifyDescription}`
         acceptLabel: FORM_TEXT.verifyAccept,
         cancelLabel: FORM_TEXT.verifyCancel,
         fields: [
+          ...checklistFields(input.items, input.compactChecklist),
           {
             type: 'paragraph',
             name: 'note',
             label: FORM_TEXT.noteLabel,
             helpText: FORM_TEXT.noteHelp,
             placeholder: FORM_TEXT.notePlaceholder,
-            lineHeight: 3,
-            required: false,
-          },
-          {
-            type: 'boolean',
-            name: 'showChecklist',
-            label: FORM_TEXT.showChecklistLabel,
-            helpText: FORM_TEXT.showChecklistHelp,
-            defaultValue: false,
-          },
-        ],
-      },
-      data: { token },
-    },
-  };
-}
-
-/**
- * The checklist form is built from the items the subreddit has configured, so
- * moderators can reword, reorder, add or remove tick-boxes without a code
- * change. The exact list shown is also recorded against the token, so editing
- * the setting while a form is open cannot mismatch answers to labels.
- */
-export function checklistFormResponse(
-  token: string,
-  note: string,
-  items: readonly ChecklistItem[],
-): UiResponse {
-  return {
-    showForm: {
-      name: 'checklistForm',
-      form: {
-        title: FORM_TEXT.checklistTitle,
-        description: FORM_TEXT.checklistDescription,
-        acceptLabel: FORM_TEXT.checklistAccept,
-        cancelLabel: FORM_TEXT.checklistCancel,
-        fields: [
-          {
-            type: 'group',
-            label: FORM_TEXT.checklistTitle,
-            fields: items.map((item) => ({
-              type: 'boolean' as const,
-              name: item.id,
-              label: item.label,
-              defaultValue: false,
-            })),
-          },
-          {
-            type: 'paragraph',
-            name: 'note',
-            label: FORM_TEXT.noteLabel,
-            helpText: FORM_TEXT.noteHelp,
-            lineHeight: 3,
+            lineHeight: 2,
             required: false,
           },
         ],
       },
-      // Carries the token forward and pre-fills the note typed on step one, so
-      // nothing the moderator already wrote is lost by opening the checklist.
-      data: { token, note: note.slice(0, CONFIG.noteMaxLength) },
+      // Values in `data` with no matching field are echoed back to the submit
+      // endpoint, which is how the token survives without being shown.
+      data: { token: input.token },
     },
   };
 }
@@ -157,6 +150,13 @@ export function settingsFormResponse(current: AppSettings): UiResponse {
                 defaultValue: current.showVerifyingModInComment,
               },
               {
+                type: 'boolean',
+                name: 'compactChecklist',
+                label: 'Compact checklist (one tick-list instead of a row of toggles)',
+                helpText: 'Keeps the verify form short, which matters most on mobile.',
+                defaultValue: current.compactChecklist,
+              },
+              {
                 type: 'paragraph',
                 name: 'checklistItems',
                 label: 'Checklist items, one per line',
@@ -176,8 +176,9 @@ export function settingsFormResponse(current: AppSettings): UiResponse {
               {
                 type: 'boolean',
                 name: 'showAuthorSummary',
-                label: "Show the author's account age and karma on this form",
-                helpText: 'Moderator-only. Costs a moment longer to open the form.',
+                label: "Show the author's history on the verify form",
+                helpText:
+                  'Account age, karma, and how many fundraisers they have had verified here before. Moderator-only.',
                 defaultValue: current.showAuthorSummary,
               },
             ],

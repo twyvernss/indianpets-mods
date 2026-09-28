@@ -105,21 +105,17 @@ export function buildVerificationComment(input: {
   }
 
   return [
-    `## Fundraiser verification — r/${input.subredditName} mod team`,
+    `## Fundraiser **Approved** by the r/${input.subredditName} mod team`,
     '',
     `The moderators of r/${input.subredditName} have reviewed documents submitted privately by the original poster for this fundraiser, and they were consistent with the fundraiser described here.`,
     '',
     '**This is not a guarantee.** We cannot audit how donated money is actually spent, we are not involved in this fundraiser, and documents can be forged or circumstances can change after a check is done. Please donate at your own discretion, and only what you can comfortably afford.',
     '',
-    `If something about this fundraiser looks wrong, report this post or [message the moderators](https://www.reddit.com/message/compose?to=/r/${input.subredditName}) — do not accuse people in the comments.`,
-    '',
-    '---',
-    '',
-    `^(Posted automatically by the r/${input.subredditName} moderator team's bot on ${input.dateLabel}.` +
-      // Only rendered when the subreddit has explicitly opted in to naming the
-      // moderator. The default keeps the check anonymous.
-      `${input.modName ? ` Verified by u/${input.modName}.` : ''}` +
-      ` Replies to this comment are not read — please use modmail.)`,
+    `If something about this fundraiser looks wrong, report this post or [message the moderators](https://www.reddit.com/message/compose?to=/r/${input.subredditName}). Please do not accuse people in the comments.`,
+    // Only rendered when the subreddit has explicitly opted in to naming the
+    // moderator. The default keeps the check anonymous, which is the whole
+    // reason this app exists.
+    ...(input.modName ? ['', `*Verified by u/${input.modName}.*`] : []),
   ].join('\n');
 }
 
@@ -139,7 +135,7 @@ export function buildReminderComment(input: {
   const greeting = input.authorName ? `u/${input.authorName}` : 'Hi there';
 
   return [
-    `${greeting} — this fundraiser was verified by the r/${input.subredditName} mod team ${input.daysSinceVerified} days ago.`,
+    `${greeting}, this fundraiser was verified by the r/${input.subredditName} mod team ${input.daysSinceVerified} days ago.`,
     '',
     'Could you post a short update as a reply here? Either:',
     '',
@@ -147,10 +143,6 @@ export function buildReminderComment(input: {
     '- that the fundraiser is **complete** and no longer taking donations.',
     '',
     `Keeping this current helps people decide whether to donate. If we do not hear anything in the next ${input.graceDays} days, a moderator will take a look at the post.`,
-    '',
-    '---',
-    '',
-    `^(Automated reminder from the r/${input.subredditName} moderator team's bot. Reply here — this comment is monitored for your reply only; for anything else please use modmail.)`,
   ].join('\n');
 }
 
@@ -258,7 +250,7 @@ export function buildIntakeComment(input: {
   const greeting = input.authorName ? `u/${input.authorName}` : 'Hi there';
 
   return [
-    `${greeting} — your post is held for review while the r/${input.subredditName} mod team checks the details. This is routine for every fundraiser here and is not an accusation.`,
+    `${greeting}, your post is held for review while the r/${input.subredditName} mod team checks the details. This is routine for every fundraiser here and is not an accusation.`,
     '',
     '**To get it approved, please [send us a modmail]' +
       `(https://www.reddit.com/message/compose?to=/r/${input.subredditName}) with:**`,
@@ -268,13 +260,9 @@ export function buildIntakeComment(input: {
     '3. The clinic’s phone number, so we can confirm the treatment.',
     '4. The fundraiser link, and who receives the money.',
     '',
-    'Please **do not** post these documents publicly — they usually contain your address and phone number. Send them by modmail only.',
+    'Please **do not** post these documents publicly, they usually contain your address and phone number. Send them by modmail only.',
     '',
     'Once we have checked them, your post is approved automatically and a verification notice is added to it.',
-    '',
-    '---',
-    '',
-    `^(Automated message from the r/${input.subredditName} moderator team's bot. Reply by modmail, not here.)`,
   ].join('\n');
 }
 
@@ -303,6 +291,8 @@ export function formatAuthorSummary(input: {
   accountAgeDays: number;
   karma: number;
   heldAtLabel: string | null;
+  /** Dates of fundraisers this app verified for them before, newest first. */
+  previousVerifiedDates: readonly string[];
 }): string {
   const age =
     input.accountAgeDays >= 365
@@ -311,6 +301,21 @@ export function formatAuthorSummary(input: {
   const karma =
     input.karma >= 1000 ? `${(input.karma / 1000).toFixed(1)}k` : String(input.karma);
 
-  const held = input.heldAtLabel ? ` · held ${input.heldAtLabel}` : '';
-  return `u/${input.username} · account ${age} · ${karma} karma${held}`;
+  const parts = [`u/${input.username}`, `account ${age}`, `${karma} karma`];
+  if (input.heldAtLabel) parts.push(`held ${input.heldAtLabel}`);
+
+  const previous = input.previousVerifiedDates;
+  if (previous.length === 0) {
+    parts.push('no previous fundraiser verified here');
+  } else {
+    // The count is the signal; the dates are the detail. Shown even when the
+    // posts themselves were later deleted, which is the point of keeping it.
+    const shown = previous.slice(0, 3).join(', ');
+    const more = previous.length > 3 ? `, +${previous.length - 3} more` : '';
+    parts.push(
+      `${previous.length} previous verified (${shown}${more})`,
+    );
+  }
+
+  return parts.join(' \u00b7 ');
 }

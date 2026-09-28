@@ -12,6 +12,9 @@
       "scope": "moderator"
     }
   },
+  "marketingAssets": {
+    "icon": "assets/icon.png"
+  },
   "menu": {
     "items": [
       {
@@ -45,7 +48,6 @@
   },
   "forms": {
     "verifyForm": "/internal/form/verify-submit",
-    "checklistForm": "/internal/form/checklist-submit",
     "settingsForm": "/internal/form/settings-submit"
   },
   "triggers": {
@@ -97,6 +99,11 @@
         "type": "paragraph",
         "label": "Verification checklist items, one per line. Blank uses the built-in list.",
         "defaultValue": ""
+      },
+      "compactChecklist": {
+        "type": "boolean",
+        "label": "Compact checklist: one tick-list instead of a row of toggles (shorter form, better on mobile)",
+        "defaultValue": true
       },
       "automodReplyEnabled": {
         "type": "boolean",

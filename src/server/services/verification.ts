@@ -6,7 +6,7 @@ import type { VerificationRepo } from '../data/verificationRepo.js';
 import { completeRecord, newPendingRecord } from '../data/verificationRepo.js';
 import type { Logger } from '../lib/logger.js';
 import { describeError } from '../lib/logger.js';
-import { formatDisplayDate } from '../lib/time.js';
+import { formatDisplayDate, formatShortDate } from '../lib/time.js';
 import type { SettingsReader } from '../settings.js';
 import { buildModNote, buildVerificationComment, formatAuthorSummary } from '../text.js';
 import type {
@@ -24,16 +24,17 @@ export type BeginOutcome =
    * AutoModerator held the post) shown on the form. Null when the setting is
    * off or the author cannot be read.
    */
-  | { kind: 'ready'; token: string; authorSummary: string | null }
+  | {
+      kind: 'ready';
+      token: string;
+      authorSummary: string | null;
+      items: ChecklistItem[];
+      compactChecklist: boolean;
+    }
   | { kind: 'already-verified'; record: VerificationRecord }
   | { kind: 'not-moderator' }
   | { kind: 'not-a-post' }
   | { kind: 'disabled' };
-
-export type ChecklistOutcome =
-  | { kind: 'ready'; token: string; items: ChecklistItem[] }
-  | { kind: 'expired' }
-  | { kind: 'not-moderator' };
 
 export type StatusOutcome =
   | { kind: 'verified'; record: VerificationRecord }
@@ -57,13 +58,6 @@ export type VerificationDeps = {
 export type VerificationService = {
   /** Called by the menu action, before the form is shown. */
   begin(targetId: string): Promise<BeginOutcome>;
-
-  /**
-   * Called when a moderator asks for the checklist on the first form.
-   * Resolves the configured items and records them against the token, so the
-   * labels stored later are exactly the ones that were displayed.
-   */
-  openChecklist(input: { token: string | null; contextPostId: T3 | null }): Promise<ChecklistOutcome>;
 
   /**
    * Called by the form submit handlers.
@@ -162,38 +156,27 @@ export function createVerificationService(deps: VerificationDeps): VerificationS
         return { kind: 'already-verified', record: existing };
       }
 
+      // The exact checklist shown is recorded against the token, so editing the
+      // setting while a form is open cannot pair the wrong labels with the
+      // submitted answers.
       const [token, authorSummary] = await Promise.all([
-        tokens.mint({ postId, modName: username, createdAtMs: now(), checklist: null }),
+        tokens.mint({
+          postId,
+          modName: username,
+          createdAtMs: now(),
+          checklist: config.checklistItems,
+        }),
         config.showAuthorSummary ? buildAuthorSummary(postId) : Promise.resolve(null),
       ]);
 
       log.info('verification started', { postId, mod: username });
-      return { kind: 'ready', token, authorSummary };
-    },
-
-    async openChecklist({ token, contextPostId }): Promise<ChecklistOutcome> {
-      let activeToken = token;
-      const target = await resolveTarget(activeToken, contextPostId);
-      if (!target) return { kind: 'expired' };
-
-      const username = await authorise(target.modName);
-      if (!username) return { kind: 'not-moderator' };
-
-      // No token came back from the form: mint a fresh one for the platform's
-      // post id so the second form still has a trustworthy anchor.
-      if (!activeToken) {
-        activeToken = await tokens.mint({
-          postId: target.postId,
-          modName: username,
-          createdAtMs: now(),
-          checklist: null,
-        });
-      }
-
-      const { checklistItems } = await settings.get();
-      await tokens.attachChecklist(activeToken, checklistItems);
-
-      return { kind: 'ready', token: activeToken, items: checklistItems };
+      return {
+        kind: 'ready',
+        token,
+        authorSummary,
+        items: config.checklistItems,
+        compactChecklist: config.compactChecklist,
+      };
     },
 
     async complete(input): Promise<VerifyOutcome> {
@@ -282,7 +265,10 @@ export function createVerificationService(deps: VerificationDeps): VerificationS
       ]);
       if (!post?.authorName) return null;
 
-      const author = await reddit.getAuthor(post.authorName);
+      const [author, history] = await Promise.all([
+        reddit.getAuthor(post.authorName),
+        repo.getAuthorHistory(post.authorName, CONFIG.authorHistoryLimit),
+      ]);
       if (!author) return null;
 
       return formatAuthorSummary({
@@ -290,6 +276,10 @@ export function createVerificationService(deps: VerificationDeps): VerificationS
         accountAgeDays: author.accountAgeDays,
         karma: author.karma,
         heldAtLabel: heldAtMs === null ? null : formatVerifiedDate(heldAtMs),
+        // Excludes the post being verified right now: it is not yet verified.
+        previousVerifiedDates: history
+          .filter((entry) => entry.postId !== postId)
+          .map((entry) => formatShortDate(entry.verifiedAtMs)),
       });
     } catch (error) {
       log.warn('author summary unavailable', { postId, reason: describeError(error) });

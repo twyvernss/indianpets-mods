@@ -160,10 +160,22 @@ describe('public comment wording', () => {
     expect(comment).toContain('at your own discretion');
   });
 
+  it('says Approved in the heading, in bold', () => {
+    const comment = buildVerificationComment({ ...base, modName: null });
+    expect(comment.split('\n')[0]).toContain('**Approved**');
+  });
+
+  it('carries no em dashes and no automated-message footer', () => {
+    const comment = buildVerificationComment({ ...base, modName: null });
+    expect(comment).not.toContain('—');
+    expect(comment).not.toContain('Posted automatically');
+    expect(comment).not.toContain('Replies to this comment');
+  });
+
   it('does not name the moderator by default', () => {
     const comment = buildVerificationComment({ ...base, modName: null });
     expect(comment).not.toContain('u/mod_one');
-    expect(comment).toContain('moderator team');
+    expect(comment).toContain('mod team');
   });
 
   it('names the moderator only when explicitly asked to', () => {
