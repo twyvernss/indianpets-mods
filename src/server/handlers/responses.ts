@@ -1,6 +1,15 @@
 import type { UiResponse } from '@devvit/web/shared';
+import type { FollowUpResult } from '../services/reminders.js';
 import { formatVerifiedDate } from '../services/verification.js';
-import { alreadyVerifiedToast, TOASTS, verifiedToast } from '../text.js';
+import {
+  alreadyEscalatedToast,
+  alreadyRemindedToast,
+  alreadyVerifiedToast,
+  escalatedToast,
+  FOLLOW_UP_TOASTS,
+  TOASTS,
+  verifiedToast,
+} from '../text.js';
 import type { VerifyOutcome } from '../types.js';
 
 /**
@@ -43,6 +52,60 @@ export function toastFor(outcome: VerifyOutcome): UiResponse {
 
     case 'failed':
       return { showToast: { text: outcome.detail, appearance: 'neutral' } };
+  }
+}
+
+/**
+ * Maps a follow-up outcome onto its toast.
+ *
+ * Same principle as above: every branch names what actually happened, and the
+ * two "already" branches say explicitly that nothing was repeated - a
+ * moderator needs to know a second comment was NOT posted on someone's post.
+ */
+export function followUpResponse(result: FollowUpResult): UiResponse {
+  switch (result.kind) {
+    case 'reminded':
+      return { showToast: { text: FOLLOW_UP_TOASTS.reminded, appearance: 'success' } };
+
+    case 'escalated':
+      return { showToast: { text: escalatedToast(result.locked), appearance: 'success' } };
+
+    case 'already-reminded':
+      return {
+        showToast: {
+          text: alreadyRemindedToast(formatVerifiedDate(result.atMs)),
+          appearance: 'neutral',
+        },
+      };
+
+    case 'already-escalated':
+      return {
+        showToast: {
+          text: alreadyEscalatedToast(formatVerifiedDate(result.atMs)),
+          appearance: 'neutral',
+        },
+      };
+
+    case 'no-record':
+      return { showToast: { text: FOLLOW_UP_TOASTS.noRecord, appearance: 'neutral' } };
+
+    case 'not-verified':
+      return { showToast: { text: FOLLOW_UP_TOASTS.notVerified, appearance: 'neutral' } };
+
+    case 'deleted':
+      return { showToast: { text: FOLLOW_UP_TOASTS.deleted, appearance: 'neutral' } };
+
+    case 'post-missing':
+      return { showToast: { text: FOLLOW_UP_TOASTS.postMissing, appearance: 'neutral' } };
+
+    case 'busy':
+      return { showToast: { text: FOLLOW_UP_TOASTS.busy, appearance: 'neutral' } };
+
+    case 'disabled':
+      return { showToast: { text: FOLLOW_UP_TOASTS.disabled, appearance: 'neutral' } };
+
+    case 'failed':
+      return { showToast: { text: result.detail, appearance: 'neutral' } };
   }
 }
 

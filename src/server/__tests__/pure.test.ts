@@ -29,6 +29,12 @@ import {
   DEFAULT_REMINDER_TEMPLATE,
   renderIntakeComment,
   starterTemplates,
+  alreadyEscalatedToast,
+  alreadyRemindedToast,
+  escalatedToast,
+  followUpDescription,
+  wikiCheckBlockedToast,
+  wikiCheckReadyToast,
 } from '../text.js';
 import { fakeLogger, FakeConfigRepo } from './fakes.js';
 
@@ -589,5 +595,110 @@ describe('every bot message is an editable template', () => {
       custom: 'Hello {op}, see r/{subredit} rules.',
     });
     expect(comment).toBe('Hello u/op_user, see r/{subredit} rules.');
+  });
+});
+
+describe('followUpDescription', () => {
+  const base = {
+    daysSinceVerified: 40,
+    daysSinceReminder: null as number | null,
+    escalated: false,
+    opResponded: false,
+    reminderDays: 30,
+    graceDays: 7,
+    remindersEnabled: true,
+    lockStalePosts: false,
+  };
+
+  it('is explicit that reporting does not lock when the setting is off', () => {
+    const text = followUpDescription(base);
+    expect(text).toContain('does not lock or remove');
+    expect(text).not.toContain('LOCK the post');
+  });
+
+  it('warns in capitals when reporting will also lock the post', () => {
+    // A moderator is one tap from locking someone's fundraiser; this must not
+    // be buried in a sentence they can skim past.
+    expect(followUpDescription({ ...base, lockStalePosts: true })).toContain('LOCK the post');
+  });
+
+  it('says whether an update has already been asked for', () => {
+    expect(followUpDescription(base)).toContain('No update has been requested yet');
+    expect(followUpDescription({ ...base, daysSinceReminder: 3 })).toContain(
+      'asked for an update 3 days ago',
+    );
+  });
+
+  it('mentions an existing report so a moderator does not expect a second one', () => {
+    expect(followUpDescription({ ...base, escalated: true })).toContain('already been reported');
+  });
+
+  it('mentions that the OP has replied', () => {
+    expect(followUpDescription({ ...base, opResponded: true })).toContain('OP has replied');
+  });
+
+  it('says plainly that nothing happens on its own when the check is off', () => {
+    const text = followUpDescription({ ...base, remindersEnabled: false });
+    expect(text).toContain('switched off');
+    expect(text).not.toContain('Normally the OP is asked');
+  });
+
+  it('never writes "1 days"', () => {
+    const text = followUpDescription({
+      ...base,
+      daysSinceVerified: 1,
+      daysSinceReminder: 1,
+      reminderDays: 1,
+      graceDays: 1,
+    });
+    expect(text).not.toContain('1 days');
+    expect(text).toContain('1 day');
+  });
+});
+
+describe('follow-up toasts', () => {
+  it('says whether the post was locked, never just "done"', () => {
+    expect(escalatedToast(true)).toContain('locked');
+    expect(escalatedToast(false)).toContain('not locked');
+  });
+
+  it('makes clear that no second comment or report was made', () => {
+    expect(alreadyRemindedToast('4 Aug 2026')).toContain('No second comment');
+    expect(alreadyEscalatedToast('4 Aug 2026')).toContain('Nothing was done again');
+  });
+});
+
+describe('wiki check toasts', () => {
+  it('names the page and the row count', () => {
+    const text = wikiCheckReadyToast({
+      page: 'fundraiser-verifications/2026-10',
+      rows: 3,
+      createdNow: false,
+    });
+    expect(text).toContain('fundraiser-verifications/2026-10');
+    expect(text).toContain('3 verifications logged');
+    expect(text).toContain('moderator-only');
+  });
+
+  it('says when it had to create the page, and uses the singular for one row', () => {
+    expect(wikiCheckReadyToast({ page: 'p', rows: 1, createdNow: true })).toContain(
+      'Created the page',
+    );
+    expect(wikiCheckReadyToast({ page: 'p', rows: 1, createdNow: true })).toContain(
+      '1 verification logged',
+    );
+  });
+
+  it('says nothing is logged yet rather than "0 verifications"', () => {
+    expect(wikiCheckReadyToast({ page: 'p', rows: 0, createdNow: true })).toContain(
+      'no verifications logged yet',
+    );
+  });
+
+  it('leads with the consequence, not the cause', () => {
+    const text = wikiCheckBlockedToast('Reddit said no.');
+    expect(text.startsWith('Nothing will be written')).toBe(true);
+    expect(text).toContain('Reddit said no.');
+    expect(text).toContain('wiki being disabled');
   });
 });

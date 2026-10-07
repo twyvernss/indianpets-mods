@@ -36,6 +36,15 @@
         "endpoint": "/internal/menu/verification-status"
       },
       {
+        "label": "Fundraiser follow-up",
+        "description": "Ask the OP for an update on this fundraiser, or report it to the modqueue.",
+        "forUserType": "moderator",
+        "location": [
+          "post"
+        ],
+        "endpoint": "/internal/menu/follow-up"
+      },
+      {
         "label": "Fundraiser tools settings",
         "description": "Turn features on or off and edit the wording, without leaving Reddit.",
         "forUserType": "moderator",
@@ -52,13 +61,23 @@
           "subreddit"
         ],
         "endpoint": "/internal/menu/notices"
+      },
+      {
+        "label": "Check the wiki log",
+        "description": "Confirm the durable verification log exists and is readable by moderators only.",
+        "forUserType": "moderator",
+        "location": [
+          "subreddit"
+        ],
+        "endpoint": "/internal/menu/wiki-check"
       }
     ]
   },
   "forms": {
     "verifyForm": "/internal/form/verify-submit",
     "settingsForm": "/internal/form/settings-submit",
-    "noticesForm": "/internal/form/notices-submit"
+    "noticesForm": "/internal/form/notices-submit",
+    "followUpForm": "/internal/form/follow-up-submit"
   },
   "triggers": {
     "onAutomoderatorFilterPost": "/internal/triggers/automod-filter-post",

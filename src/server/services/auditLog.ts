@@ -29,7 +29,23 @@ import type { RedditPort } from './redditPort.js';
 export type AuditLogService = {
   /** Appends one verification. Called from a scheduled job, never inline. */
   record(record: VerificationRecord): Promise<void>;
+
+  /**
+   * Proves, on demand, that the wiki log is actually working.
+   *
+   * Runs exactly what a verification runs - this month's page name, the same
+   * privacy check - and reports what it found. Without this, the only evidence
+   * the log works is a line in `devvit logs` after a real verification, which
+   * is a poor way to discover that a subreddit has its wiki switched off.
+   */
+  check(): Promise<WikiLogCheck>;
 };
+
+/** What {@link AuditLogService.check} found. */
+export type WikiLogCheck =
+  | { kind: 'off' }
+  | { kind: 'ready'; page: string; rows: number; createdNow: boolean }
+  | { kind: 'blocked'; page: string; reason: string };
 
 export type AuditLogDeps = {
   reddit: RedditPort;
@@ -174,14 +190,15 @@ export function createAuditLogService(deps: AuditLogDeps): AuditLogService {
         // verifying moderator, and this app exists precisely so moderators are
         // not publicly attached to verifications - so nothing is written until
         // the page is PROVEN moderator-only. This fails closed on purpose.
-        const isPrivate = await reddit.ensureWikiPagePrivate(page, auditPageHeader(subredditName));
+        const privacy = await reddit.ensureWikiPagePrivate(page, auditPageHeader(subredditName));
 
-        if (!isPrivate) {
+        if (!privacy.ok) {
           // Skip the wiki only. Mod Discussions is a separate channel and is
           // not affected by a wiki permission problem.
           log.error('skipping the wiki log: page could not be confirmed moderator-only', {
             page,
             postId: record.postId,
+            reason: privacy.reason,
           });
         } else {
           await appendRow(page, subredditName, record, row);
@@ -202,7 +219,50 @@ export function createAuditLogService(deps: AuditLogDeps): AuditLogService {
         }
       }
     },
+
+    async check(): Promise<WikiLogCheck> {
+      const config = await settings.get();
+      if (!config.enabled || !config.wikiLogEnabled) return { kind: 'off' };
+
+      const subredditName = reddit.subredditName();
+      const page = auditPageName(config.wikiLogPage, now());
+
+      // Whether the page existed BEFORE the check matters: the check creates it
+      // if it is missing, and a moderator should be told that happened rather
+      // than wondering where a new wiki page came from.
+      const before = await reddit.readWikiPage(page);
+
+      const privacy = await reddit.ensureWikiPagePrivate(page, auditPageHeader(subredditName));
+      if (!privacy.ok) {
+        log.error('wiki log check failed', { page, reason: privacy.reason });
+        return { kind: 'blocked', page, reason: privacy.reason };
+      }
+
+      const content = before ?? (await reddit.readWikiPage(page));
+      log.info('wiki log check passed', { page, existed: before !== null });
+
+      return {
+        kind: 'ready',
+        page,
+        rows: countRows(content),
+        createdNow: before === null,
+      };
+    },
   };
+}
+
+/**
+ * Rows currently on a log page.
+ *
+ * Counts post ids rather than table rows, so the two header lines and any note
+ * a moderator adds by hand are not mistaken for verifications. `auditRow`
+ * writes the prefixed id exactly once per row - the permalink it builds
+ * alongside has the prefix stripped - so occurrences and rows are the same
+ * number.
+ */
+export function countRows(content: string | null): number {
+  if (!content) return 0;
+  return content.split('t3_').length - 1;
 }
 
 /** The Mod Discussions message. Same facts as the wiki row, laid out to read. */

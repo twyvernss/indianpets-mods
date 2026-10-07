@@ -1,14 +1,26 @@
 import type { MenuItemRequest, UiResponse } from '@devvit/web/shared';
 import { Hono } from 'hono';
 import { getContainer } from '../container.js';
+import { asPostId } from '../data/tokenRepo.js';
 import {
+  followUpFormResponse,
   noticesFormResponse,
   settingsFormResponse,
   verifyFormResponse,
 } from '../formDefinitions.js';
 import { describeError } from '../lib/logger.js';
 import { formatVerifiedDate } from '../services/verification.js';
-import { alreadyVerifiedToast, heldByAutomodToast, statusToast, TOASTS } from '../text.js';
+import {
+  alreadyVerifiedToast,
+  FOLLOW_UP_TOASTS,
+  followUpDescription,
+  heldByAutomodToast,
+  statusToast,
+  TOASTS,
+  WIKI_CHECK_TEXT,
+  wikiCheckBlockedToast,
+  wikiCheckReadyToast,
+} from '../text.js';
 import { UNEXPECTED_ERROR } from './responses.js';
 
 export const menu = new Hono();
@@ -172,6 +184,126 @@ menu.post('/notices', async (c) => {
     return c.json<UiResponse>(noticesFormResponse(await settings.get()));
   } catch (error) {
     log.error('notices menu action failed', { reason: describeError(error) });
+    return c.json<UiResponse>(UNEXPECTED_ERROR);
+  }
+});
+
+/**
+ * "Fundraiser follow-up" - the manual entry point to the staleness chase.
+ *
+ * Opens a form showing the post's current state. Nothing is written here: the
+ * action happens on submit, so a moderator who opens this and cancels has
+ * changed nothing.
+ */
+menu.post('/follow-up', async (c) => {
+  const { log, reminders, gate, tokens } = getContainer();
+
+  try {
+    const { targetId } = await c.req.json<MenuItemRequest>();
+    const postId = asPostId(targetId);
+    if (!postId) {
+      return c.json<UiResponse>({ showToast: { text: TOASTS.notAPost, appearance: 'neutral' } });
+    }
+
+    // Authorised here as well as on submit. `forUserType` only controls who
+    // sees the item; this is still a plain HTTP endpoint.
+    const username = await gate.actingUsername();
+    if (!username || !(await gate.isModerator(username))) {
+      return c.json<UiResponse>({
+        showToast: { text: TOASTS.notModerator, appearance: 'neutral' },
+      });
+    }
+
+    const state = await reminders.inspectFollowUp(postId);
+
+    switch (state.kind) {
+      case 'no-record':
+        return c.json<UiResponse>({
+          showToast: { text: FOLLOW_UP_TOASTS.noRecord, appearance: 'neutral' },
+        });
+      case 'not-verified':
+        return c.json<UiResponse>({
+          showToast: { text: FOLLOW_UP_TOASTS.notVerified, appearance: 'neutral' },
+        });
+      case 'deleted':
+        return c.json<UiResponse>({
+          showToast: { text: FOLLOW_UP_TOASTS.deleted, appearance: 'neutral' },
+        });
+      case 'ready': {
+        // Server-minted, so the submit endpoint never has to trust a post id
+        // from the client. Same mechanism the verify form uses.
+        const token = await tokens.mint({
+          postId,
+          modName: username,
+          createdAtMs: Date.now(),
+          checklist: null,
+          templates: null,
+        });
+
+        return c.json<UiResponse>(
+          followUpFormResponse({
+            token,
+            nextStep: state.nextStep,
+            description: followUpDescription({
+              daysSinceVerified: state.daysSinceVerified,
+              daysSinceReminder: state.daysSinceReminder,
+              escalated: state.record.escalatedAtMs !== null,
+              opResponded: state.record.opRespondedAtMs !== null,
+              reminderDays: state.settings.reminderDays,
+              graceDays: state.settings.graceDays,
+              remindersEnabled: state.settings.staleRemindersEnabled,
+              lockStalePosts: state.settings.lockStalePosts,
+            }),
+          }),
+        );
+      }
+    }
+  } catch (error) {
+    log.error('follow-up menu action failed', { reason: describeError(error) });
+    return c.json<UiResponse>(UNEXPECTED_ERROR);
+  }
+});
+
+/**
+ * "Check the wiki log" - proves the durable log actually works.
+ *
+ * Runs the real privacy check against the real page for this month, reports
+ * what it found, and drops the moderator on the page so they can see it.
+ */
+menu.post('/wiki-check', async (c) => {
+  const { log, audit, gate, reddit } = getContainer();
+
+  try {
+    const username = await gate.actingUsername();
+    if (!username || !(await gate.isModerator(username))) {
+      return c.json<UiResponse>({
+        showToast: { text: TOASTS.notModerator, appearance: 'neutral' },
+      });
+    }
+
+    const result = await audit.check();
+
+    switch (result.kind) {
+      case 'off':
+        return c.json<UiResponse>({
+          showToast: { text: WIKI_CHECK_TEXT.off, appearance: 'neutral' },
+        });
+
+      case 'blocked':
+        return c.json<UiResponse>({
+          showToast: { text: wikiCheckBlockedToast(result.reason), appearance: 'neutral' },
+        });
+
+      case 'ready':
+        // Toast and navigation together: the toast is the verdict, the page is
+        // the evidence. Both fields of UiResponse are independent.
+        return c.json<UiResponse>({
+          showToast: { text: wikiCheckReadyToast(result), appearance: 'success' },
+          navigateTo: `https://www.reddit.com/r/${reddit.subredditName()}/wiki/${result.page}`,
+        });
+    }
+  } catch (error) {
+    log.error('wiki-check menu action failed', { reason: describeError(error) });
     return c.json<UiResponse>(UNEXPECTED_ERROR);
   }
 });

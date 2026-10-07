@@ -309,3 +309,239 @@ describe('noteOpActivity', () => {
     expect(h.reddit.calls).toEqual([]);
   });
 });
+
+/**
+ * The moderator-initiated follow-up.
+ *
+ * These tests exist because the nightly chase otherwise takes 30 days plus a
+ * 7-day grace to observe even once. They pin down that the manual path does
+ * exactly what the sweep does, and that it cannot be used to double-comment
+ * or double-report.
+ */
+describe('runFollowUp', () => {
+  it('asks the OP for an update however recently the post was verified', async () => {
+    const h = harness();
+    // One minute old: the nightly sweep would not look at this post at all.
+    await h.seed({ postId: 't3_fresh', verifiedAtMs: NOW - 60_000 });
+
+    const result = await h.service.runFollowUp({ postId: 't3_fresh' as T3, step: 'next' });
+
+    expect(result.kind).toBe('reminded');
+    expect(h.reddit.comments).toHaveLength(1);
+    expect((await h.repo.get('t3_fresh' as T3))?.reminderSentAtMs).toBe(NOW);
+  });
+
+  it('posts the same reminder wording the nightly sweep posts', async () => {
+    const manual = harness();
+    await manual.seed({ postId: 't3_a', verifiedAtMs: NOW - 40 * DAY });
+    await manual.service.runFollowUp({ postId: 't3_a' as T3, step: 'remind' });
+
+    const swept = harness();
+    await swept.seed({ postId: 't3_a', verifiedAtMs: NOW - 40 * DAY });
+    await swept.service.sweep({ offset: 0, batchIndex: 0 });
+
+    expect(manual.reddit.comments[0]).toBe(swept.reddit.comments[0]);
+  });
+
+  it('never posts a second reminder on the same post', async () => {
+    const h = harness();
+    await h.seed({ postId: 't3_twice', reminderSentAtMs: NOW - 2 * DAY });
+
+    const result = await h.service.runFollowUp({ postId: 't3_twice' as T3, step: 'remind' });
+
+    expect(result).toEqual({ kind: 'already-reminded', atMs: NOW - 2 * DAY });
+    expect(h.reddit.comments).toHaveLength(0);
+  });
+
+  it('reports to the modqueue without waiting out the grace period', async () => {
+    const h = harness({ lockStalePosts: false });
+    // Reminded one minute ago, so the sweep would still be in its grace window.
+    await h.seed({ postId: 't3_soon', reminderSentAtMs: NOW - 60_000 });
+
+    const result = await h.service.runFollowUp({ postId: 't3_soon' as T3, step: 'escalate' });
+
+    expect(result).toEqual({ kind: 'escalated', locked: false });
+    expect(h.reddit.reports).toHaveLength(1);
+    expect(h.reddit.locked).toHaveLength(0);
+  });
+
+  it('locks the post as well when the subreddit opted in', async () => {
+    const h = harness({ lockStalePosts: true });
+    await h.seed({ postId: 't3_lock', reminderSentAtMs: NOW - 60_000 });
+
+    const result = await h.service.runFollowUp({ postId: 't3_lock' as T3, step: 'escalate' });
+
+    expect(result).toEqual({ kind: 'escalated', locked: true });
+    expect(h.reddit.locked).toEqual(['t3_lock']);
+  });
+
+  it('still reports when the lock fails, and says the post is not locked', async () => {
+    // A failed lock must not abort the escalation: the report is already filed,
+    // and throwing would leave the post in the open index to be reported a
+    // second time by the next sweep.
+    const h = harness({ lockStalePosts: true }, { failOn: { lock: new Error('locked down') } });
+    await h.seed({ postId: 't3_nolock', reminderSentAtMs: NOW - 60_000 });
+
+    const result = await h.service.runFollowUp({ postId: 't3_nolock' as T3, step: 'escalate' });
+
+    expect(result).toEqual({ kind: 'escalated', locked: false });
+    expect(h.reddit.reports).toHaveLength(1);
+  });
+
+  it('never reports the same post twice', async () => {
+    const h = harness();
+    await h.seed({
+      postId: 't3_done',
+      reminderSentAtMs: NOW - 10 * DAY,
+      escalatedAtMs: NOW - 3 * DAY,
+    });
+
+    const result = await h.service.runFollowUp({ postId: 't3_done' as T3, step: 'escalate' });
+
+    expect(result).toEqual({ kind: 'already-escalated', atMs: NOW - 3 * DAY });
+    expect(h.reddit.reports).toHaveLength(0);
+  });
+
+  it('rolls the report back when Reddit rejects it, so a retry is possible', async () => {
+    const h = harness({}, { failOn: { report: new Error('reddit down') } });
+    await h.seed({ postId: 't3_fail', reminderSentAtMs: NOW - 10 * DAY });
+
+    const result = await h.service.runFollowUp({ postId: 't3_fail' as T3, step: 'escalate' });
+
+    expect(result.kind).toBe('failed');
+    expect((await h.repo.get('t3_fail' as T3))?.escalatedAtMs).toBeNull();
+  });
+
+  it('rolls the reminder back when the comment is rejected', async () => {
+    const h = harness({}, { failOn: { comment: new Error('rate limited') } });
+    await h.seed({ postId: 't3_cfail' });
+
+    const result = await h.service.runFollowUp({ postId: 't3_cfail' as T3, step: 'remind' });
+
+    expect(result.kind).toBe('failed');
+    expect((await h.repo.get('t3_cfail' as T3))?.reminderSentAtMs).toBeNull();
+  });
+
+  it('picks the reminder first and the report second when told to decide', async () => {
+    const h = harness();
+    await h.seed({ postId: 't3_seq' });
+
+    expect((await h.service.runFollowUp({ postId: 't3_seq' as T3, step: 'next' })).kind).toBe(
+      'reminded',
+    );
+    expect((await h.service.runFollowUp({ postId: 't3_seq' as T3, step: 'next' })).kind).toBe(
+      'escalated',
+    );
+    expect(h.reddit.comments).toHaveLength(1);
+    expect(h.reddit.reports).toHaveLength(1);
+  });
+
+  it('works even when the nightly check is switched off', async () => {
+    // This is how a moderator tries the feature out before enabling it.
+    const h = harness({ staleRemindersEnabled: false });
+    await h.seed({ postId: 't3_off' });
+
+    expect((await h.service.runFollowUp({ postId: 't3_off' as T3, step: 'remind' })).kind).toBe(
+      'reminded',
+    );
+  });
+
+  it('refuses when the app itself is switched off', async () => {
+    const h = harness({ enabled: false });
+    await h.seed({ postId: 't3_master' });
+
+    expect(await h.service.runFollowUp({ postId: 't3_master' as T3, step: 'remind' })).toEqual({
+      kind: 'disabled',
+    });
+    expect(h.reddit.comments).toHaveLength(0);
+  });
+
+  it('declines a post the app has never verified', async () => {
+    const h = harness();
+
+    expect(await h.service.runFollowUp({ postId: 't3_unknown' as T3, step: 'next' })).toEqual({
+      kind: 'no-record',
+    });
+  });
+
+  it('declines a post that has been deleted', async () => {
+    const h = harness();
+    await h.seed({ postId: 't3_gone', deletedAtMs: NOW - DAY });
+
+    expect(await h.service.runFollowUp({ postId: 't3_gone' as T3, step: 'next' })).toEqual({
+      kind: 'deleted',
+    });
+  });
+
+  it('reports the post as missing when it is gone from Reddit', async () => {
+    const h = harness({}, { post: null });
+    await h.seed({ postId: 't3_404' });
+
+    expect(await h.service.runFollowUp({ postId: 't3_404' as T3, step: 'remind' })).toEqual({
+      kind: 'post-missing',
+    });
+    expect(h.reddit.comments).toHaveLength(0);
+  });
+
+  it('refuses a second concurrent run on the same post', async () => {
+    // The lock is what stops two taps on a phone posting two reminders.
+    const h = harness();
+    await h.seed({ postId: 't3_busy' });
+    await h.repo.acquireLock('t3_busy' as T3, 'someone-else', NOW);
+
+    expect(await h.service.runFollowUp({ postId: 't3_busy' as T3, step: 'remind' })).toEqual({
+      kind: 'busy',
+    });
+    expect(h.reddit.comments).toHaveLength(0);
+  });
+
+  it('releases the lock afterwards so a later run is not blocked', async () => {
+    const h = harness();
+    await h.seed({ postId: 't3_rel' });
+
+    await h.service.runFollowUp({ postId: 't3_rel' as T3, step: 'remind' });
+
+    expect(await h.repo.acquireLock('t3_rel' as T3, 'next-run', NOW)).toBe(true);
+  });
+});
+
+describe('inspectFollowUp', () => {
+  it('reports the reminder as the next step before one has been sent', async () => {
+    const h = harness();
+    await h.seed({ postId: 't3_i1', verifiedAtMs: NOW - 12 * DAY });
+
+    const state = await h.service.inspectFollowUp('t3_i1' as T3);
+
+    expect(state.kind).toBe('ready');
+    if (state.kind !== 'ready') return;
+    expect(state.nextStep).toBe('remind');
+    expect(state.daysSinceVerified).toBe(12);
+    expect(state.daysSinceReminder).toBeNull();
+  });
+
+  it('reports the report as the next step once the OP has been asked', async () => {
+    const h = harness();
+    await h.seed({
+      postId: 't3_i2',
+      verifiedAtMs: NOW - 40 * DAY,
+      reminderSentAtMs: NOW - 5 * DAY,
+    });
+
+    const state = await h.service.inspectFollowUp('t3_i2' as T3);
+
+    expect(state.kind).toBe('ready');
+    if (state.kind !== 'ready') return;
+    expect(state.nextStep).toBe('escalate');
+    expect(state.daysSinceReminder).toBe(5);
+  });
+
+  it('writes nothing and calls Reddit not at all', async () => {
+    const h = harness();
+    await h.seed({ postId: 't3_i3' });
+
+    await h.service.inspectFollowUp('t3_i3' as T3);
+
+    expect(h.reddit.comments).toHaveLength(0);
+    expect(h.reddit.reports).toHaveLength(0);
+  });
+});

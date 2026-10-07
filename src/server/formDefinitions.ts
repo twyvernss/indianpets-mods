@@ -2,10 +2,12 @@ import type { FormField, UiResponse } from '@devvit/web/shared';
 import { CONFIG } from './config.js';
 import type { AppSettings } from './settings.js';
 import { ANY_FLAIR, checklistItemsToText } from './settings.js';
+import type { FollowUpStep } from './services/reminders.js';
 import {
   DEFAULT_INTAKE_TEMPLATE,
   DEFAULT_NOTICE_TEMPLATE,
   DEFAULT_REMINDER_TEMPLATE,
+  FOLLOW_UP_TEXT,
   FORM_TEXT,
 } from './text.js';
 import type { ChecklistItem, MessageTemplate } from './types.js';
@@ -438,6 +440,54 @@ export function settingsFormResponse(
           },
         ],
       },
+    },
+  };
+}
+
+/** The step a moderator picked, or "let the app decide". */
+export const FOLLOW_UP_FIELD = 'step';
+
+/**
+ * The follow-up form.
+ *
+ * Deliberately a form rather than a one-tap menu action: it can report and
+ * lock someone's fundraiser, so the moderator sees the post's current state
+ * and what the button will do before pressing it.
+ */
+export function followUpFormResponse(input: {
+  token: string;
+  description: string;
+  nextStep: FollowUpStep;
+}): UiResponse {
+  const nextLabel =
+    input.nextStep === 'remind'
+      ? `${FOLLOW_UP_TEXT.nextOption} (ask the OP)`
+      : `${FOLLOW_UP_TEXT.nextOption} (report it)`;
+
+  return {
+    showForm: {
+      name: 'followUpForm',
+      form: {
+        title: FOLLOW_UP_TEXT.title,
+        description: input.description,
+        acceptLabel: FOLLOW_UP_TEXT.accept,
+        cancelLabel: FOLLOW_UP_TEXT.cancel,
+        fields: [
+          {
+            type: 'select',
+            name: FOLLOW_UP_FIELD,
+            label: FOLLOW_UP_TEXT.stepLabel,
+            helpText: FOLLOW_UP_TEXT.stepHelp,
+            options: [
+              { label: nextLabel, value: 'next' },
+              { label: FOLLOW_UP_TEXT.remindOption, value: 'remind' },
+              { label: FOLLOW_UP_TEXT.escalateOption, value: 'escalate' },
+            ],
+            defaultValue: ['next'],
+          },
+        ],
+      },
+      data: { token: input.token },
     },
   };
 }

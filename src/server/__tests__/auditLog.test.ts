@@ -1,6 +1,13 @@
 import type { T3 } from '@devvit/web/shared';
 import { describe, expect, it } from 'vitest';
-import { auditPageName, auditRow, createAuditLogService, modDiscussionBody } from '../services/auditLog.js';
+import {
+  auditPageHeader,
+  auditPageName,
+  auditRow,
+  countRows,
+  createAuditLogService,
+  modDiscussionBody,
+} from '../services/auditLog.js';
 import type { AppSettings } from '../settings.js';
 import type { VerificationRecord } from '../types.js';
 import { fakeLogger, fakeSettings, FakeRedis, FakeReddit } from './fakes.js';
@@ -227,5 +234,80 @@ describe('wiki privacy', () => {
 
     expect(h.reddit.wiki.size).toBe(0);
     expect(h.reddit.modDiscussions).toHaveLength(1);
+  });
+});
+
+/**
+ * The on-demand wiki check.
+ *
+ * The whole point of it is to replace "verify a real fundraiser and then go
+ * read devvit logs" as the only way to find out whether the durable log works.
+ */
+describe('check', () => {
+  it('confirms a page it had to create, and says it created it', async () => {
+    const h = harness();
+
+    const result = await h.service.check();
+
+    expect(result).toEqual({ kind: 'ready', page: PAGE, rows: 0, createdNow: true });
+    expect(h.reddit.wiki.has(PAGE)).toBe(true);
+  });
+
+  it('seeds the new page with nothing that names a moderator', async () => {
+    const h = harness();
+
+    await h.service.check();
+
+    expect(h.reddit.wiki.get(PAGE)).not.toContain('mod_one');
+  });
+
+  it('counts the verifications already on an existing page', async () => {
+    const h = harness();
+    await h.service.record(record({ postId: 't3_one' as T3 }));
+    await h.service.record(record({ postId: 't3_two' as T3 }));
+
+    const result = await h.service.check();
+
+    expect(result).toEqual({ kind: 'ready', page: PAGE, rows: 2, createdNow: false });
+  });
+
+  it('reports why nothing can be written when the page cannot be restricted', async () => {
+    const h = harness();
+    h.reddit.wikiPrivate = false;
+
+    const result = await h.service.check();
+
+    expect(result.kind).toBe('blocked');
+    if (result.kind !== 'blocked') return;
+    expect(result.page).toBe(PAGE);
+    expect(result.reason).toContain('wiki is disabled');
+  });
+
+  it('says so when the wiki log is switched off rather than pretending to check', async () => {
+    const h = harness({ wikiLogEnabled: false });
+
+    expect(await h.service.check()).toEqual({ kind: 'off' });
+    expect(h.reddit.calls).toEqual([]);
+  });
+
+  it('checks the same page a verification right now would write to', async () => {
+    const h = harness();
+
+    const checked = await h.service.check();
+    await h.service.record(record());
+
+    expect(checked.kind).toBe('ready');
+    if (checked.kind !== 'ready') return;
+    expect(h.reddit.wiki.get(checked.page)).toContain('t3_abc123');
+  });
+});
+
+describe('countRows', () => {
+  it('ignores the header and counts one per verification', () => {
+    expect(countRows(null)).toBe(0);
+    expect(countRows(auditPageHeader('indianpets'))).toBe(0);
+    expect(
+      countRows([auditPageHeader('indianpets'), auditRow(record(), 'indianpets')].join('\n')),
+    ).toBe(1);
   });
 });

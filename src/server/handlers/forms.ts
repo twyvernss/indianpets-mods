@@ -4,7 +4,12 @@ import { Hono } from 'hono';
 import { CONFIG } from '../config.js';
 import { getContainer } from '../container.js';
 import { asPostId } from '../data/tokenRepo.js';
-import { CHECKLIST_FIELD, NOTICE_SLOTS, noticeFieldNames } from '../formDefinitions.js';
+import {
+  CHECKLIST_FIELD,
+  FOLLOW_UP_FIELD,
+  NOTICE_SLOTS,
+  noticeFieldNames,
+} from '../formDefinitions.js';
 import { describeError } from '../lib/logger.js';
 import {
   sanitizeMultiline,
@@ -12,10 +17,11 @@ import {
   toBoolean,
   toNonEmptyString,
 } from '../lib/sanitize.js';
+import type { FollowUpStep } from '../services/reminders.js';
 import { messageTemplatesToText, pickOverrides } from '../settings.js';
 import { TOASTS } from '../text.js';
 import type { MessageTemplate, VerifyFormValues } from '../types.js';
-import { toastFor, UNEXPECTED_ERROR } from './responses.js';
+import { followUpResponse, toastFor, UNEXPECTED_ERROR } from './responses.js';
 
 export const forms = new Hono();
 
@@ -186,6 +192,72 @@ forms.post('/notices-submit', async (c) => {
     });
   } catch (error) {
     log.error('notices-submit failed', { reason: describeError(error) });
+    return c.json<UiResponse>(UNEXPECTED_ERROR);
+  }
+});
+
+/** Narrows the submitted step to the three values the service accepts. */
+function readStep(value: unknown): FollowUpStep | 'next' {
+  const raw = readSelected(value);
+  return raw === 'remind' || raw === 'escalate' ? raw : 'next';
+}
+
+/**
+ * The follow-up form submission.
+ *
+ * The target post comes from the server-minted token, never from the request
+ * body, and the acting moderator is re-checked here: this endpoint can report
+ * and lock a post.
+ */
+forms.post('/follow-up-submit', async (c) => {
+  const { log, reminders, gate, tokens } = getContainer();
+
+  try {
+    const username = await gate.actingUsername();
+    if (!username || !(await gate.isModerator(username))) {
+      return c.json<UiResponse>({
+        showToast: { text: TOASTS.notModerator, appearance: 'neutral' },
+      });
+    }
+
+    const body = await c.req.json<Record<string, unknown>>();
+    const token = toNonEmptyString(body['token']);
+
+    // Token first, for the reason given in the verify flow; `context.postId` is
+    // the documented fallback and is equally platform-supplied. A post id from
+    // the form body is never trusted.
+    let postId: T3 | null = null;
+    if (token) {
+      const payload = await tokens.resolve(token);
+      // A token that was supplied but did not resolve means the window lapsed.
+      // Falling back would silently defeat it, so this fails closed.
+      if (!payload) {
+        return c.json<UiResponse>({
+          showToast: { text: TOASTS.expired, appearance: 'neutral' },
+        });
+      }
+      if (payload.modName.toLowerCase() !== username.toLowerCase()) {
+        return c.json<UiResponse>({
+          showToast: { text: TOASTS.notModerator, appearance: 'neutral' },
+        });
+      }
+      postId = payload.postId;
+      await tokens.consume(token);
+    } else {
+      postId = contextPostId();
+    }
+
+    if (!postId) {
+      return c.json<UiResponse>({ showToast: { text: TOASTS.notAPost, appearance: 'neutral' } });
+    }
+
+    const step = readStep(body[FOLLOW_UP_FIELD]);
+    const result = await reminders.runFollowUp({ postId, step });
+
+    log.info('follow-up run', { postId, step, outcome: result.kind, mod: username });
+    return c.json<UiResponse>(followUpResponse(result));
+  } catch (error) {
+    log.error('follow-up-submit failed', { reason: describeError(error) });
     return c.json<UiResponse>(UNEXPECTED_ERROR);
   }
 });

@@ -9,6 +9,7 @@ import type {
   PostSnapshot,
   RedditPort,
   SchedulerPort,
+  WikiPrivacy,
 } from '../services/redditPort.js';
 import type { AppSettings, SettingsReader } from '../settings.js';
 import { DEFAULT_SETTINGS } from '../settings.js';
@@ -247,11 +248,11 @@ export class FakeReddit implements RedditPort {
   /** Set false to simulate a page that could not be restricted to moderators. */
   public wikiPrivate = true;
 
-  async ensureWikiPagePrivate(page: string, seedContent: string): Promise<boolean> {
+  async ensureWikiPagePrivate(page: string, seedContent: string): Promise<WikiPrivacy> {
     this.calls.push('ensureWikiPrivate');
-    if (!this.wikiPrivate) return false;
+    if (!this.wikiPrivate) return { ok: false, reason: 'wiki is disabled in this test' };
     if (!this.wiki.has(page)) this.wiki.set(page, seedContent);
-    return true;
+    return { ok: true };
   }
 
   async writeWikiPage(page: string, content: string): Promise<void> {

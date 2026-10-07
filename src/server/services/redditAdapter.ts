@@ -12,6 +12,7 @@ import type {
   PostSnapshot,
   RedditPort,
   SchedulerPort,
+  WikiPrivacy,
 } from './redditPort.js';
 
 /**
@@ -156,7 +157,7 @@ export function createRedditAdapter(log: Logger): RedditPort {
       }
     },
 
-    async ensureWikiPagePrivate(page: string, seedContent: string): Promise<boolean> {
+    async ensureWikiPagePrivate(page: string, seedContent: string): Promise<WikiPrivacy> {
       try {
         const existing = await this.readWikiPage(page);
 
@@ -188,20 +189,20 @@ export function createRedditAdapter(log: Logger): RedditPort {
           reddit.getWikiPageSettings(context.subredditName, page),
         );
 
-        const isPrivate = Number(settings.permLevel) === Number(WIKI_MODS_ONLY);
-        if (!isPrivate) {
-          log.error('wiki log page is NOT restricted to moderators; refusing to write to it', {
-            page,
-            permLevel: String(settings.permLevel),
-          });
-        }
-        return isPrivate;
-      } catch (error) {
-        log.error('could not confirm the wiki log page is private', {
+        if (Number(settings.permLevel) === Number(WIKI_MODS_ONLY)) return { ok: true };
+
+        const reason = `Reddit reports this page's permission level as ${String(
+          settings.permLevel,
+        )}, not moderators-only (${String(WIKI_MODS_ONLY)}).`;
+        log.error('wiki log page is NOT restricted to moderators; refusing to write to it', {
           page,
-          reason: describeError(error),
+          permLevel: String(settings.permLevel),
         });
-        return false;
+        return { ok: false, reason };
+      } catch (error) {
+        const reason = describeError(error);
+        log.error('could not confirm the wiki log page is private', { page, reason });
+        return { ok: false, reason };
       }
     },
 

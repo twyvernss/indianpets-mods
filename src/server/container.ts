@@ -3,6 +3,7 @@ import type { ConfigRepo } from './data/configRepo.js';
 import { createConfigRepo } from './data/configRepo.js';
 import { createLinkRepo } from './data/linkRepo.js';
 import type { RedisPort } from './data/redisPort.js';
+import type { TokenRepo } from './data/tokenRepo.js';
 import { createTokenRepo } from './data/tokenRepo.js';
 import type { VerificationRepo } from './data/verificationRepo.js';
 import { createVerificationRepo } from './data/verificationRepo.js';
@@ -39,6 +40,7 @@ import { createSettingsReader } from './settings.js';
 export type Container = {
   log: Logger;
   repo: VerificationRepo;
+  tokens: TokenRepo;
   config: ConfigRepo;
   settings: SettingsReader;
   gate: ModeratorGate;
@@ -115,6 +117,7 @@ export function getContainer(): Container {
   instance = {
     log,
     repo,
+    tokens,
     config,
     settings,
     gate,

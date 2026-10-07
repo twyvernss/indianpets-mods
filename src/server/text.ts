@@ -386,3 +386,122 @@ export function formatAuthorSummary(input: {
 
   return parts.join(' \u00b7 ');
 }
+
+/* ------------------------------------------------------------------------ */
+/* Follow-up on a fundraiser that has gone quiet                             */
+/* ------------------------------------------------------------------------ */
+
+export const FOLLOW_UP_TEXT = {
+  title: 'Fundraiser follow-up',
+  accept: 'Run it',
+  cancel: 'Cancel',
+  stepLabel: 'What should happen now',
+  stepHelp:
+    'This runs the same steps the nightly check runs, immediately, without waiting out the configured days.',
+  nextOption: 'Whatever the nightly check would do next',
+  remindOption: 'Ask the OP for an update now',
+  escalateOption: 'Report to the modqueue now',
+} as const;
+
+/**
+ * The follow-up form's description: everything the app knows about this post,
+ * in plain sentences.
+ *
+ * A moderator is about to report or lock someone's fundraiser, so the form has
+ * to say what state the post is actually in and what the button will do. It
+ * must never be vague about the lock, which is the one visible consequence.
+ */
+export function followUpDescription(input: {
+  daysSinceVerified: number;
+  daysSinceReminder: number | null;
+  escalated: boolean;
+  opResponded: boolean;
+  reminderDays: number;
+  graceDays: number;
+  remindersEnabled: boolean;
+  lockStalePosts: boolean;
+}): string {
+  const parts: string[] = [`Verified ${dayCount(input.daysSinceVerified)} ago.`];
+
+  if (input.daysSinceReminder === null) {
+    parts.push('No update has been requested yet.');
+  } else {
+    parts.push(`The OP was asked for an update ${dayCount(input.daysSinceReminder)} ago.`);
+  }
+
+  if (input.opResponded) parts.push('The OP has replied since.');
+  if (input.escalated) parts.push('This post has already been reported to the modqueue.');
+
+  parts.push(
+    input.remindersEnabled
+      ? `Normally the OP is asked after ${dayCount(input.reminderDays)} and the post is reported ${dayCount(input.graceDays)} later.`
+      : 'The nightly check is switched off, so nothing happens on its own.',
+  );
+
+  parts.push(
+    input.lockStalePosts
+      ? 'Reporting will also LOCK the post, because that setting is on.'
+      : 'Reporting does not lock or remove the post.',
+  );
+
+  return parts.join(' ');
+}
+
+/** "1 day" / "30 days", so sentences never read "1 days". */
+function dayCount(days: number): string {
+  return days === 1 ? '1 day' : `${days} days`;
+}
+
+export const FOLLOW_UP_TOASTS = {
+  reminded: 'Asked the OP for an update. The comment is on the post now.',
+  noRecord: 'This post has not been verified by the app, so there is nothing to follow up.',
+  notVerified: 'A verification for this post is still in progress. Try again in a few seconds.',
+  deleted: 'That post has been deleted, so the app has stopped chasing it.',
+  postMissing: 'That post no longer exists on Reddit. The app has stopped chasing it.',
+  busy: 'Another follow-up for this post is already running. Give it a few seconds.',
+  disabled: 'The app is switched off. Turn it back on from "Fundraiser tools settings".',
+} as const;
+
+export function escalatedToast(locked: boolean): string {
+  return locked
+    ? 'Reported to the modqueue and locked the post.'
+    : 'Reported to the modqueue. The post is not locked.';
+}
+
+export function alreadyRemindedToast(dateLabel: string): string {
+  return `The OP was already asked on ${dateLabel}. No second comment was posted.`;
+}
+
+export function alreadyEscalatedToast(dateLabel: string): string {
+  return `Already reported to the modqueue on ${dateLabel}. Nothing was done again.`;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Wiki log diagnostic                                                       */
+/* ------------------------------------------------------------------------ */
+
+export const WIKI_CHECK_TEXT = {
+  off: 'The wiki log is switched off. Turn on "Keep a durable verification log" in the settings menu.',
+} as const;
+
+export function wikiCheckReadyToast(input: {
+  page: string;
+  rows: number;
+  createdNow: boolean;
+}): string {
+  const state = input.createdNow
+    ? 'Created the page and confirmed it is moderator-only'
+    : 'Confirmed the page is moderator-only';
+  const rows =
+    input.rows === 0
+      ? 'no verifications logged yet'
+      : `${input.rows} verification${input.rows === 1 ? '' : 's'} logged`;
+  return `${state}: ${input.page} (${rows}).`;
+}
+
+export function wikiCheckBlockedToast(reason: string): string {
+  return truncate(
+    `Nothing will be written to the wiki log: ${reason} The usual cause is the wiki being disabled for this community.`,
+    300,
+  );
+}

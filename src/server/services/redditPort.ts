@@ -41,6 +41,15 @@ export type CommentHandle = {
   distinguishAndSticky(): Promise<void>;
 };
 
+/**
+ * Outcome of the wiki privacy check.
+ *
+ * Carries the reason on failure, because the only way a moderator can fix a
+ * wiki problem is to be told what it actually was. A bare `false` is enough to
+ * decide whether to write, but useless for the diagnostic menu action.
+ */
+export type WikiPrivacy = { ok: true } | { ok: false; reason: string };
+
 export type ModNoteInput = {
   username: string;
   postId: T3;
@@ -89,10 +98,10 @@ export type RedditPort = {
    * which must contain no usernames), applies MODS_ONLY, and then READS THE
    * SETTING BACK to confirm it took.
    *
-   * Returns false if privacy could not be proven. Callers must not write
-   * anything identifying to the page when it returns false.
+   * Returns `{ ok: false }` with a reason if privacy could not be proven.
+   * Callers must not write anything identifying to the page in that case.
    */
-  ensureWikiPagePrivate(page: string, seedContent: string): Promise<boolean>;
+  ensureWikiPagePrivate(page: string, seedContent: string): Promise<WikiPrivacy>;
   /** Replaces a wiki page's contents. Only safe after the check above passes. */
   writeWikiPage(page: string, content: string, reason: string): Promise<void>;
   /** Posts to Mod Discussions. Does not involve or notify any user. */
