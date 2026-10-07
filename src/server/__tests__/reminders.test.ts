@@ -545,3 +545,36 @@ describe('inspectFollowUp', () => {
     expect(h.reddit.reports).toHaveLength(0);
   });
 });
+
+describe('pinning the reminder', () => {
+  it('pins and distinguishes the reminder, like the verification notice', async () => {
+    const h = harness();
+    await h.seed({ postId: 't3_pin' });
+
+    await h.service.runFollowUp({ postId: 't3_pin' as T3, step: 'remind' });
+
+    expect(h.reddit.calls).toContain('distinguish');
+  });
+
+  it('keeps the reminder when it cannot be pinned, and does not roll it back', async () => {
+    // Reddit allows only two stickied comments per post, so a failed pin is a
+    // normal outcome. Rolling back would make the next sweep comment again.
+    const h = harness({}, { failOn: { distinguish: new Error('too many stickies') } });
+    await h.seed({ postId: 't3_nopin' });
+
+    const result = await h.service.runFollowUp({ postId: 't3_nopin' as T3, step: 'remind' });
+
+    expect(result.kind).toBe('reminded');
+    expect(h.reddit.comments).toHaveLength(1);
+    expect((await h.repo.get('t3_nopin' as T3))?.reminderSentAtMs).toBe(NOW);
+  });
+
+  it('pins reminders sent by the nightly sweep too', async () => {
+    const h = harness();
+    await h.seed({ postId: 't3_swept', verifiedAtMs: NOW - 40 * DAY });
+
+    await h.service.sweep({ offset: 0, batchIndex: 0 });
+
+    expect(h.reddit.calls).toContain('distinguish');
+  });
+});

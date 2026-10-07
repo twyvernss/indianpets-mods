@@ -291,8 +291,10 @@ export function createReminderService(deps: ReminderDeps): ReminderService {
     const daysSinceVerified = daysBetween(record.verifiedAtMs, timestamp);
 
     await repo.update({ ...record, reminderSentAtMs: timestamp });
+
+    let comment;
     try {
-      await reddit.submitAppComment(
+      comment = await reddit.submitAppComment(
         record.postId,
         buildReminderComment({
           custom: config.customReminderText,
@@ -307,6 +309,23 @@ export function createReminderService(deps: ReminderDeps): ReminderService {
       await repo.update({ ...record, reminderSentAtMs: null });
       throw error;
     }
+
+    // Pinned and distinguished, like the verification notice: the OP needs to
+    // see it, and so does anyone deciding whether to donate today.
+    //
+    // Best-effort on purpose. Reddit allows only two stickied comments per
+    // post, so this can legitimately fail on a busy post - and a reminder that
+    // is merely unpinned is far better than one rolled back and re-posted,
+    // which would comment on the fundraiser twice.
+    try {
+      await comment.distinguishAndSticky();
+    } catch (error) {
+      log.warn('posted the reminder but could not pin it', {
+        postId: record.postId,
+        reason: describeError(error),
+      });
+    }
+
     return 'reminded';
   }
 

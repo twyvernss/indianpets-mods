@@ -61,17 +61,40 @@ export function verifiedToast(dateLabel: string): string {
   return `Verified. The post is approved and the notice is stickied (${dateLabel}).`;
 }
 
-export function statusToast(
-  modName: string,
-  dateLabel: string,
-  hasChecklist: boolean,
-  hasNote: boolean,
-): string {
+/**
+ * The status toast.
+ *
+ * Carries the follow-up state as well as the verification, because otherwise
+ * there is no way to see at a glance whether the OP was ever asked for an
+ * update and whether they answered. The app learns about a reply from the
+ * comment trigger; this is where a moderator finds out.
+ */
+export function statusToast(input: {
+  modName: string;
+  dateLabel: string;
+  hasChecklist: boolean;
+  hasNote: boolean;
+  reminderSentAtMs: number | null;
+  opRespondedAtMs: number | null;
+  escalatedAtMs: number | null;
+}): string {
   const extras: string[] = [];
-  if (hasChecklist) extras.push('checklist filled');
-  if (hasNote) extras.push('note attached');
+  if (input.hasChecklist) extras.push('checklist filled');
+  if (input.hasNote) extras.push('note attached');
   const suffix = extras.length > 0 ? ` (${extras.join(', ')})` : '';
-  return `Verified by u/${modName} on ${dateLabel}${suffix}.`;
+
+  // Most recent fact first: a reply supersedes the chase, and a report
+  // supersedes the wait.
+  let follow = '';
+  if (input.opRespondedAtMs !== null) {
+    follow = ' The OP replied after being asked for an update.';
+  } else if (input.escalatedAtMs !== null) {
+    follow = ' Reported to the modqueue: the OP never replied.';
+  } else if (input.reminderSentAtMs !== null) {
+    follow = ' The OP has been asked for an update and has not replied yet.';
+  }
+
+  return `Verified by u/${input.modName} on ${input.dateLabel}${suffix}.${follow}`;
 }
 
 export function heldByAutomodToast(dateLabel: string): string {

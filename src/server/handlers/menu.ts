@@ -102,12 +102,15 @@ menu.post('/verification-status', async (c) => {
       case 'verified':
         return c.json<UiResponse>({
           showToast: {
-            text: statusToast(
-              outcome.record.modName,
-              formatVerifiedDate(outcome.record.verifiedAtMs),
-              outcome.record.checklist !== null,
-              outcome.record.note.length > 0,
-            ),
+            text: statusToast({
+              modName: outcome.record.modName,
+              dateLabel: formatVerifiedDate(outcome.record.verifiedAtMs),
+              hasChecklist: outcome.record.checklist !== null,
+              hasNote: outcome.record.note.length > 0,
+              reminderSentAtMs: outcome.record.reminderSentAtMs,
+              opRespondedAtMs: outcome.record.opRespondedAtMs,
+              escalatedAtMs: outcome.record.escalatedAtMs,
+            }),
             appearance: 'success',
           },
         });
