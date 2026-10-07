@@ -214,12 +214,17 @@
       "graceDays": {
         "type": "number",
         "label": "Days to wait for a reply before reporting the post to the modqueue",
-        "defaultValue": 7
+        "defaultValue": 1
       },
       "lockStalePosts": {
         "type": "boolean",
         "label": "Also lock a stale fundraiser when reporting it",
         "defaultValue": false
+      },
+      "alwaysReportStale": {
+        "type": "boolean",
+        "label": "Report to the modqueue even if the OP did reply (a reply is not always an answer)",
+        "defaultValue": true
       },
       "customReminderText": {
         "type": "paragraph",

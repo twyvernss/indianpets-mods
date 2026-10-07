@@ -121,7 +121,10 @@ describe('sweep - reminding', () => {
   });
 
   it('honours custom reminder wording', async () => {
-    const h = harness({ customReminderText: 'Hi {op}, {days} days in r/{subreddit}, {grace} to go.' });
+    const h = harness({
+      customReminderText: 'Hi {op}, {days} days in r/{subreddit}, {grace} to go.',
+      graceDays: 7,
+    });
     await h.seed({ postId: 't3_old' });
 
     await h.service.sweep({ offset: 0, batchIndex: 0 });
@@ -156,7 +159,7 @@ describe('sweep - escalation', () => {
   });
 
   it('waits out the grace period before escalating', async () => {
-    const h = harness();
+    const h = harness({ graceDays: 7 });
     await h.seed({ postId: 't3_old' });
 
     await h.service.sweep({ offset: 0, batchIndex: 0 });
@@ -267,7 +270,9 @@ describe('sweep - batching', () => {
 });
 
 describe('noteOpActivity', () => {
-  it('stops the chase when the OP replies after a reminder', async () => {
+  it('records the reply but still reports, which is the default', async () => {
+    // The mod team wants eyes on every chased fundraiser, because a reply is
+    // not the same as a real answer.
     const h = harness();
     await h.seed({ postId: 't3_old' });
     await h.service.sweep({ offset: 0, batchIndex: 0 });
@@ -276,9 +281,23 @@ describe('noteOpActivity', () => {
     await h.service.noteOpActivity({ postId: 't3_old' as T3, author: 'OP_user' });
 
     expect((await h.repo.get('t3_old' as T3))?.opRespondedAtMs).toBe(NOW + DAY);
+    expect(h.redis.sizeOf(keys.openIndex())).toBe(1);
+
+    h.setNow(NOW + 20 * DAY);
+    await h.service.sweep({ offset: 0, batchIndex: 0 });
+    expect(h.reddit.reports).toHaveLength(1);
+  });
+
+  it('stops the chase on a reply when the subreddit opts out of that', async () => {
+    const h = harness({ alwaysReportStale: false });
+    await h.seed({ postId: 't3_old' });
+    await h.service.sweep({ offset: 0, batchIndex: 0 });
+
+    h.setNow(NOW + DAY);
+    await h.service.noteOpActivity({ postId: 't3_old' as T3, author: 'OP_user' });
+
     expect(h.redis.sizeOf(keys.openIndex())).toBe(0);
 
-    // And no escalation follows.
     h.setNow(NOW + 20 * DAY);
     await h.service.sweep({ offset: 0, batchIndex: 0 });
     expect(h.reddit.reports).toHaveLength(0);

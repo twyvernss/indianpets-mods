@@ -404,6 +404,13 @@ export function settingsFormResponse(
               },
               {
                 type: 'boolean',
+                name: 'alwaysReportStale',
+                label: 'Report even if the OP replied',
+                helpText: 'On by default. A reply is not always a real answer.',
+                defaultValue: current.alwaysReportStale,
+              },
+              {
+                type: 'boolean',
                 name: 'lockStalePosts',
                 label: 'Also lock the post when reporting it',
                 helpText: 'Off by default.',

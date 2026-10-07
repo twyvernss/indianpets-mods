@@ -99,6 +99,14 @@ export type AppSettings = {
   graceDays: number;
   /** Off by default. Locking is destructive enough to be an opt-in. */
   lockStalePosts: boolean;
+  /**
+   * Report a chased fundraiser to the modqueue when the grace period is up
+   * even if the OP did reply.
+   *
+   * On by default: a reply is not the same as an answer, and the mod team
+   * would rather glance at every one than silently miss a brush-off.
+   */
+  alwaysReportStale: boolean;
   /** Blank means "use the built-in reminder wording". */
   customReminderText: string;
 
@@ -131,6 +139,7 @@ export const OVERRIDABLE_KEYS = [
   'reminderDays',
   'graceDays',
   'lockStalePosts',
+  'alwaysReportStale',
   'customReminderText',
   'minAccountAgeDays',
   'minKarma',
@@ -166,8 +175,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
 
   staleRemindersEnabled: true,
   reminderDays: 30,
-  graceDays: 7,
+  graceDays: 1,
   lockStalePosts: false,
+  alwaysReportStale: true,
   customReminderText: '',
 
   minAccountAgeDays: 0,
@@ -416,6 +426,10 @@ export function parseSettings(raw: Record<string, unknown>): AppSettings {
       reminders.maxGraceDays,
     ),
     lockStalePosts: coerceBoolean(raw['lockStalePosts'], DEFAULT_SETTINGS.lockStalePosts),
+    alwaysReportStale: coerceBoolean(
+      raw['alwaysReportStale'],
+      DEFAULT_SETTINGS.alwaysReportStale,
+    ),
     customReminderText: coerceString(raw['customReminderText'], DEFAULT_SETTINGS.customReminderText),
 
     minAccountAgeDays: coerceNumber(

@@ -125,7 +125,7 @@ export function createReminderService(deps: ReminderDeps): ReminderService {
 
       for (const record of records) {
         try {
-          const outcome = await handleOne(record, timestamp, graceMs, config.lockStalePosts);
+          const outcome = await handleOne(record, timestamp, graceMs, config);
           if (outcome === 'reminded') result.reminded += 1;
           else if (outcome === 'escalated') result.escalated += 1;
           else if (outcome === 'closed') result.closed += 1;
@@ -185,9 +185,16 @@ export function createReminderService(deps: ReminderDeps): ReminderService {
       if (record.reminderSentAtMs === null) return; // Not being chased yet.
 
       await repo.update({ ...record, opRespondedAtMs: now() });
-      await repo.closeOpen(postId);
 
-      log.info('OP replied after a reminder; chase closed', { postId });
+      // The reply is always RECORDED, so the status action can show it. Whether
+      // it ends the chase is the subreddit's choice.
+      const config = await settings.get();
+      if (!config.alwaysReportStale) await repo.closeOpen(postId);
+
+      log.info('OP replied after a reminder', {
+        postId,
+        chaseClosed: !config.alwaysReportStale,
+      });
     },
 
     async inspectFollowUp(postId): Promise<FollowUpInspection> {
@@ -378,10 +385,14 @@ export function createReminderService(deps: ReminderDeps): ReminderService {
     record: VerificationRecord,
     timestamp: number,
     graceMs: number,
-    lockStalePosts: boolean,
+    config: AppSettings,
   ): Promise<'reminded' | 'escalated' | 'closed' | 'waiting'> {
-    // Deleted, removed or already-answered posts leave the chase quietly.
-    if (record.deletedAtMs !== null || record.opRespondedAtMs !== null) {
+    // A deleted post always leaves the chase. A post the OP ANSWERED only
+    // leaves it when the subreddit wants replies to end the chase - by default
+    // it does not, because a reply is not the same as an answer and the mod
+    // team would rather glance at every one.
+    const answeredAndDone = record.opRespondedAtMs !== null && !config.alwaysReportStale;
+    if (record.deletedAtMs !== null || answeredAndDone) {
       await repo.closeOpen(record.postId);
       return 'closed';
     }
@@ -392,7 +403,7 @@ export function createReminderService(deps: ReminderDeps): ReminderService {
 
     if (timestamp - record.reminderSentAtMs < graceMs) return 'waiting';
 
-    await escalate(record, timestamp, lockStalePosts);
+    await escalate(record, timestamp, config.lockStalePosts);
     return 'escalated';
   }
 }
