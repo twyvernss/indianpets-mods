@@ -528,3 +528,37 @@ export function wikiCheckBlockedToast(reason: string): string {
     300,
   );
 }
+
+/**
+ * The result of a manually triggered sweep.
+ *
+ * Says what was examined as well as what was done, because "nothing happened"
+ * and "nothing was due" look identical otherwise, and only one of them is a
+ * problem worth investigating.
+ */
+export function sweepToast(result: {
+  examined: number;
+  reminded: number;
+  escalated: number;
+  closed: number;
+  chained: boolean;
+}): string {
+  if (result.examined === 0) {
+    return 'Nothing is due yet. No fundraiser has been waiting long enough.';
+  }
+
+  const done: string[] = [];
+  if (result.reminded > 0) done.push(`${result.reminded} asked for an update`);
+  if (result.escalated > 0) done.push(`${result.escalated} reported to the modqueue`);
+  if (result.closed > 0) done.push(`${result.closed} closed`);
+
+  const summary = done.length > 0 ? done.join(', ') : 'nothing was due yet';
+  const more = result.chained ? ' More are still being processed.' : '';
+
+  return `Checked ${result.examined} verified fundraiser${
+    result.examined === 1 ? '' : 's'
+  }: ${summary}.${more}`;
+}
+
+export const SWEEP_DISABLED =
+  'The nightly check is switched off. Turn on "Ask the OP for an update on old verified fundraisers" in the settings menu.';

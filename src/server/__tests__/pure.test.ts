@@ -32,6 +32,7 @@ import {
   alreadyEscalatedToast,
   alreadyRemindedToast,
   escalatedToast,
+  sweepToast,
   followUpDescription,
   wikiCheckBlockedToast,
   wikiCheckReadyToast,
@@ -700,5 +701,34 @@ describe('wiki check toasts', () => {
     expect(text.startsWith('Nothing will be written')).toBe(true);
     expect(text).toContain('Reddit said no.');
     expect(text).toContain('wiki being disabled');
+  });
+});
+
+describe('sweepToast', () => {
+  const empty = { examined: 0, reminded: 0, escalated: 0, closed: 0, chained: false };
+
+  it('distinguishes "nothing was due" from "nothing happened"', () => {
+    // These look identical to a moderator otherwise, and only one of them is
+    // worth investigating.
+    expect(sweepToast(empty)).toContain('Nothing is due yet');
+    expect(sweepToast({ ...empty, examined: 3 })).toContain('Checked 3 verified fundraisers');
+  });
+
+  it('names what it actually did', () => {
+    const text = sweepToast({ examined: 5, reminded: 2, escalated: 1, closed: 1, chained: false });
+    expect(text).toContain('2 asked for an update');
+    expect(text).toContain('1 reported to the modqueue');
+    expect(text).toContain('1 closed');
+  });
+
+  it('says when more batches are still running', () => {
+    expect(sweepToast({ ...empty, examined: 10, reminded: 10, chained: true })).toContain(
+      'More are still being processed',
+    );
+    expect(sweepToast({ ...empty, examined: 1, reminded: 1 })).not.toContain('still being');
+  });
+
+  it('never writes "1 fundraisers"', () => {
+    expect(sweepToast({ ...empty, examined: 1, reminded: 1 })).toContain('1 verified fundraiser:');
   });
 });

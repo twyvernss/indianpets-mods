@@ -63,6 +63,15 @@
         "endpoint": "/internal/menu/notices"
       },
       {
+        "label": "Run the nightly check now",
+        "description": "Run the stale-fundraiser check immediately instead of waiting for 3 AM.",
+        "forUserType": "moderator",
+        "location": [
+          "subreddit"
+        ],
+        "endpoint": "/internal/menu/run-sweep"
+      },
+      {
         "label": "Check the wiki log",
         "description": "Confirm the durable verification log exists and is readable by moderators only.",
         "forUserType": "moderator",

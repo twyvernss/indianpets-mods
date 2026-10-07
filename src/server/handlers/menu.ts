@@ -16,6 +16,8 @@ import {
   followUpDescription,
   heldByAutomodToast,
   statusToast,
+  SWEEP_DISABLED,
+  sweepToast,
   TOASTS,
   WIKI_CHECK_TEXT,
   wikiCheckBlockedToast,
@@ -307,6 +309,44 @@ menu.post('/wiki-check', async (c) => {
     }
   } catch (error) {
     log.error('wiki-check menu action failed', { reason: describeError(error) });
+    return c.json<UiResponse>(UNEXPECTED_ERROR);
+  }
+});
+
+/**
+ * "Run the nightly check now".
+ *
+ * The same sweep the 03:00 cron runs, on demand. It does NOT bypass the
+ * configured waiting periods - that is the point. It answers "is the schedule
+ * working?", whereas the per-post follow-up answers "does the action work?".
+ */
+menu.post('/run-sweep', async (c) => {
+  const { log, reminders, settings, gate } = getContainer();
+
+  try {
+    const username = await gate.actingUsername();
+    if (!username || !(await gate.isModerator(username))) {
+      return c.json<UiResponse>({
+        showToast: { text: TOASTS.notModerator, appearance: 'neutral' },
+      });
+    }
+
+    const config = await settings.get();
+    if (!config.enabled || !config.staleRemindersEnabled) {
+      return c.json<UiResponse>({ showToast: { text: SWEEP_DISABLED, appearance: 'neutral' } });
+    }
+
+    const result = await reminders.sweep({ offset: 0, batchIndex: 0 });
+    log.info('sweep run by hand', { mod: username, ...result });
+
+    return c.json<UiResponse>({
+      showToast: {
+        text: sweepToast(result),
+        appearance: result.examined > 0 ? 'success' : 'neutral',
+      },
+    });
+  } catch (error) {
+    log.error('run-sweep menu action failed', { reason: describeError(error) });
     return c.json<UiResponse>(UNEXPECTED_ERROR);
   }
 });
