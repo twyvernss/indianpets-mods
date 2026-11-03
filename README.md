@@ -213,6 +213,17 @@ npx devvit install r/IndianPets
 Installing creates the app account and grants it moderator permissions on the subreddit
 automatically — there is no moderator invite to accept.
 
+**What happens on its own after install (and after every upgrade):** the app queues its catch-up
+jobs. It fingerprints the ~1,000 newest posts for alt matching (about 20 runs of 50, a minute or
+two), and writes any past verification missing from the wiki log, with its status and the
+poster's history page (3 per run, roughly an hour per 1,000 verifications). Nothing needs to be
+started by hand, and re-running is harmless.
+
+**The wiki pages create themselves**, moderator-only and unlisted: the start page, this month's
+log and the poster index on the first verification (or the first **Open the verification log**),
+a new month's page on that month's first verification, and a history page per poster. Open them
+on old.reddit.com.
+
 To ship an update later, run `npm run check && npx devvit publish` again (every version is
 re-reviewed, though updates get a streamlined review), then update the installed version from the
 app's page under **Installed in communities**.

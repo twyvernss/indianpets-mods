@@ -243,41 +243,56 @@ triggers.post('/post-delete', async (c) => {
 });
 
 /**
- * A new version of the app was installed.
+ * Queues the catch-up jobs that fill in what the app has not seen yet.
  *
- * Kicks off the per-author history backfill, so history added in a later
- * version still covers fundraisers verified before it existed. Cheap and
- * idempotent, so running it on every upgrade is fine.
+ *  - per-author verification history, for records older than that index;
+ *  - fingerprints of the subreddit's ~1,000 newest posts, so alt matching has
+ *    something to compare a new post with from the first day;
+ *  - wiki log rows, statuses and history pages for past verifications. Until
+ *    0.0.11 the privacy check misread every page as public, so nothing was
+ *    logged.
+ *
+ * Every job skips work already done, so running them on each install and
+ * upgrade is safe. They run on the scheduler, a few items per run.
  */
-triggers.post('/app-upgrade', async (c) => {
+async function queueBackfills(reason: string): Promise<void> {
   const { log, scheduler } = getContainer();
 
-  try {
-    await scheduler.runJob({
-      name: JOBS.authorBackfill,
-      data: { offset: 0, batchIndex: 0 },
-      runAt: new Date(Date.now() + 10_000),
-    });
-    // Fingerprints recent posts, so alt matching has something to compare a
-    // new post with from the first day rather than only from now on.
-    await scheduler.runJob({
-      name: JOBS.altBackfill,
-      data: { after: '', batchIndex: 0 },
-      runAt: new Date(Date.now() + 30_000),
-    });
-    // Writes any verification the wiki log is missing. Until 0.0.11 the
-    // privacy check misread every page as public, so nothing was logged.
-    // Rows already on the wiki are skipped, so this is safe on every upgrade.
-    await scheduler.runJob({
-      name: JOBS.auditBackfill,
-      data: { offset: 0, batchIndex: 0 },
-      runAt: new Date(Date.now() + 60_000),
-    });
-    log.info('queued author history, fingerprint and wiki log backfills after upgrade');
-  } catch (error) {
-    log.error('app-upgrade trigger failed', { reason: describeError(error) });
-  }
+  await scheduler.runJob({
+    name: JOBS.authorBackfill,
+    data: { offset: 0, batchIndex: 0 },
+    runAt: new Date(Date.now() + 10_000),
+  });
+  await scheduler.runJob({
+    name: JOBS.altBackfill,
+    data: { after: '', batchIndex: 0 },
+    runAt: new Date(Date.now() + 30_000),
+  });
+  await scheduler.runJob({
+    name: JOBS.auditBackfill,
+    data: { offset: 0, batchIndex: 0 },
+    runAt: new Date(Date.now() + 60_000),
+  });
+  log.info('queued author history, fingerprint and wiki log backfills', { reason });
+}
 
+/** The app was installed in a community for the first time. */
+triggers.post('/app-install', async (c) => {
+  try {
+    await queueBackfills('install');
+  } catch (error) {
+    getContainer().log.error('app-install trigger failed', { reason: describeError(error) });
+  }
+  return c.json({ status: 'ok' });
+});
+
+/** A new version of the app was installed. */
+triggers.post('/app-upgrade', async (c) => {
+  try {
+    await queueBackfills('upgrade');
+  } catch (error) {
+    getContainer().log.error('app-upgrade trigger failed', { reason: describeError(error) });
+  }
   return c.json({ status: 'ok' });
 });
 
