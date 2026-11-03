@@ -196,7 +196,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   sameAuthorRepostHours: 24,
 
   staleRemindersEnabled: true,
-  reminderDays: 30,
+  reminderDays: 7,
   graceDays: 1,
   lockStalePosts: false,
   alwaysReportStale: true,

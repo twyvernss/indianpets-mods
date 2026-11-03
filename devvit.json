@@ -254,7 +254,7 @@
       "reminderDays": {
         "type": "number",
         "label": "Days after verification before asking the OP for an update",
-        "defaultValue": 30
+        "defaultValue": 7
       },
       "graceDays": {
         "type": "number",

@@ -50,7 +50,7 @@ No moderator's personal account ever appears on the post.
 - Short links (bit.ly and friends) are indexed and flagged as unexpanded — see *Short links* below.
 
 **Stale fundraisers (v2)**
-- A nightly job finds verified fundraisers older than *N* days (default 30) and asks the OP for an
+- A nightly job finds verified fundraisers older than *N* days (default 7) and asks the OP for an
   update or a "completed" confirmation.
 - After the grace period (default 1 day) the post is reported to the modqueue **whether or not the
   OP replied** — a reply is not always an answer. The reply is recorded and shown. Turn off
@@ -182,7 +182,7 @@ streams logs. You can pin a default subreddit by adding this to `devvit.json`:
     account and repeat with a third: the reason should say `(BANNED here)`.
 12. Check `devvit logs` for the structured JSON lines.
 
-Testing the reminder flow without waiting 30 days: set **Days after verification** to `1` in the
+Testing the reminder flow without waiting 7 days: set **Days after verification** to `1` in the
 settings form, verify a post, and either wait for the nightly job or trigger it from the Devvit
 scheduler. Set it back afterwards.
 
@@ -248,7 +248,7 @@ Layer 1 wins over layer 2, which wins over the built-in defaults.
 | Hours before the same person may repost | 24 | Match your subreddit rules. A repost that waits this long is never reported. `0` = no waiting period (never reported). Set very high (`8760`) if you do not allow reposts at all. |
 | Scan comments for links | **off** | Much more traffic for a comparatively rare signal. |
 | Ask the OP for an update | on | The nightly staleness sweep. |
-| Days before asking for an update | 30 | Clamped to 1–365. |
+| Days before asking for an update | 7 | Clamped to 1–365. |
 | Grace days before reporting | 1 | Clamped to 1–90. |
 | Report even if the OP replied | on | Off lets a reply close the chase. |
 | Lock a stale fundraiser when reporting | **off** | Opt-in; locking is destructive. |
