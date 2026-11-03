@@ -54,17 +54,19 @@ export function parseJson<T>(raw: string | null | undefined, validate: (value: u
 /**
  * The `limit` newest members of a sorted set scored by time.
  *
- * Redis reads a REVERSED score range as (highest, lowest). Passing the range
- * the natural way round, (0, max), returns nothing at all - which silently
- * emptied every "newest first" read in this app until it was caught. Every
- * newest-first read goes through here so it cannot happen again.
+ * Devvit takes the score range as (lowest, highest) EVEN WHEN reversed, and
+ * swaps it into Redis's (highest, lowest) order itself - see `ZRange` in
+ * `@devvit/redis/test/mocks/RedisMock.js`. Raw Redis wants the opposite, and
+ * passing it that way through Devvit returns nothing at all, which once emptied
+ * alt matching on the dev subreddit. Every newest-first read goes through here
+ * so that is decided in exactly one place.
  */
 export async function newestByScore(
   redis: RedisPort,
   key: string,
   limit: number,
 ): Promise<{ member: string; score: number }[]> {
-  return redis.zRange(key, Number.MAX_SAFE_INTEGER, 0, {
+  return redis.zRange(key, 0, Number.MAX_SAFE_INTEGER, {
     by: 'score',
     reverse: true,
     limit: { offset: 0, count: limit },

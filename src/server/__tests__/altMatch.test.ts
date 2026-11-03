@@ -296,14 +296,15 @@ describe('alt check', () => {
 });
 
 describe('newest-first reads', () => {
-  it('returns the newest members, where the natural range order returns nothing', async () => {
+  it('returns the newest members, where the raw-Redis range order returns nothing', async () => {
     const redis = new FakeRedis();
     await redis.zAdd('k', { member: 'old', score: 1 }, { member: 'mid', score: 2 }, { member: 'new', score: 3 });
 
     expect((await newestByScore(redis, 'k', 2)).map((entry) => entry.member)).toEqual(['new', 'mid']);
-    // The bug this guards against: real Redis reads a reversed range as (max, min).
+    // The trap: raw Redis wants a reversed range as (max, min); Devvit does
+    // that swap itself, so passing it that way matches nothing.
     expect(
-      await redis.zRange('k', 0, Number.MAX_SAFE_INTEGER, { by: 'score', reverse: true, limit: { offset: 0, count: 2 } }),
+      await redis.zRange('k', Number.MAX_SAFE_INTEGER, 0, { by: 'score', reverse: true, limit: { offset: 0, count: 2 } }),
     ).toEqual([]);
   });
 

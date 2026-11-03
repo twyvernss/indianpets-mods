@@ -102,13 +102,13 @@ export class FakeRedis implements RedisPort {
       .map(([member, score]) => ({ member, score }))
       .sort((a, b) => a.score - b.score || a.member.localeCompare(b.member));
 
-    // Mirrors real Redis and Devvit 0.14.5, so tests catch the two traps:
-    //  - a REVERSED score range is given as (highest, lowest); the natural
-    //    (lowest, highest) order matches nothing;
+    // Mirrors Devvit 0.14.5 (its own RedisMock), so tests catch two traps:
+    //  - a score range is (lowest, highest) even when reversed - Devvit swaps
+    //    it for Redis - so (highest, lowest) matches nothing;
     //  - a score or lex range with no `limit` returns at most 1,000 members.
     if (options?.by === 'score') {
-      const low = Number(options.reverse ? stop : start);
-      const high = Number(options.reverse ? start : stop);
+      const low = Number(start);
+      const high = Number(stop);
       entries = entries.filter((entry) => entry.score >= low && entry.score <= high);
     } else {
       entries = entries.slice(Number(start), Number(stop) + 1);
