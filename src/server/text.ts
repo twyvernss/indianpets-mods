@@ -506,19 +506,17 @@ export function wikiCheckReadyToast(input: {
   rows: number;
   createdNow: boolean;
 }): string {
-  const state = input.createdNow
-    ? 'Created the page and confirmed it is moderator-only'
-    : 'Confirmed the page is moderator-only';
+  const state = input.createdNow ? "Started this month's log" : 'Log is moderator-only';
   const rows =
     input.rows === 0
-      ? 'no verifications logged yet'
-      : `${input.rows} verification${input.rows === 1 ? '' : 's'} logged`;
-  return `${state}: ${input.page} (${rows}).`;
+      ? 'nothing verified this month yet'
+      : `${input.rows} verification${input.rows === 1 ? '' : 's'} this month`;
+  return `${state}: ${rows}. Opening the start page - bookmark it.`;
 }
 
 export function wikiCheckBlockedToast(reason: string): string {
   return truncate(
-    `Nothing will be written to the wiki log: ${reason} The usual cause is the wiki being disabled for this community.`,
+    `Nothing will be written to the wiki log: ${reason} Check the page's settings on old.reddit.com.`,
     300,
   );
 }

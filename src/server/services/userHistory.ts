@@ -186,6 +186,7 @@ export function createUserHistoryService(deps: UserHistoryDeps): UserHistoryServ
       '# Poster history pages',
       '',
       'One page per poster, rebuilt by the mod team bot. Moderators only.',
+      `[Back to all fundraiser records](${wikiPageUrl(reddit.subredditName(), basePage)})`,
       '',
     ].join('\n');
 

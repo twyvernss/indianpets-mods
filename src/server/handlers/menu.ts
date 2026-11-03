@@ -263,7 +263,7 @@ menu.post('/wiki-check', async (c) => {
         // the evidence. Both fields of UiResponse are independent.
         return c.json<UiResponse>({
           showToast: { text: wikiCheckReadyToast(result), appearance: 'success' },
-          navigateTo: wikiPageUrl(reddit.subredditName(), result.page),
+          navigateTo: wikiPageUrl(reddit.subredditName(), result.openPage),
         });
     }
   } catch (error) {

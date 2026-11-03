@@ -50,7 +50,7 @@ export type AuditLogService = {
 /** What {@link AuditLogService.check} found. */
 export type WikiLogCheck =
   | { kind: 'off' }
-  | { kind: 'ready'; page: string; rows: number; createdNow: boolean }
+  | { kind: 'ready'; page: string; openPage: string; rows: number; createdNow: boolean }
   | { kind: 'blocked'; page: string; reason: string };
 
 export type AuditLogDeps = {
@@ -96,12 +96,12 @@ function checklistCell(record: VerificationRecord): string {
 }
 
 /** The header a freshly created monthly page starts with. */
-export function auditPageHeader(subredditName: string): string {
+export function auditPageHeader(subredditName: string, basePage?: string): string {
   return [
     `# Fundraiser verification log - r/${subredditName}`,
     '',
     'Written automatically by the mod team bot, one row per verified fundraiser.',
-    'Per-user history pages live under the users/ subpage.',
+    ...(basePage ? [`[All months and poster history pages](${wikiPageUrl(subredditName, basePage)})`] : []),
     '',
     'This page is restricted to moderators. If you can read it without being a',
     'moderator of this community, please tell the mod team: the bot refuses to',
@@ -109,6 +109,31 @@ export function auditPageHeader(subredditName: string): string {
     '',
     AUDIT_TABLE_HEADER,
     AUDIT_TABLE_RULE,
+  ].join('\n');
+}
+
+/**
+ * The moderator-only start page, at `{basePage}` itself.
+ *
+ * Every page this app writes is unlisted, so none of them appear in the wiki's
+ * page list and the wiki tab cannot reach them. This one page links them all,
+ * so the mod team has a single address to bookmark. Rebuilt whole from the
+ * list of months, never edited in place.
+ */
+export function hubPageContent(subredditName: string, basePage: string, monthPages: readonly string[]): string {
+  const months = [...monthPages].sort().reverse();
+  return [
+    `# Fundraiser records - r/${subredditName}`,
+    '',
+    'Moderators only. Kept up to date by the mod team bot - bookmark this page.',
+    '',
+    `- **[Poster history pages](${wikiPageUrl(subredditName, `${basePage}/users`)})** - one page per poster: every post with links, who verified it, and which accounts they match.`,
+    '',
+    '## Verification log, by month',
+    '',
+    ...(months.length > 0
+      ? months.map((page) => `- [${page.slice(page.lastIndexOf('/') + 1)}](${wikiPageUrl(subredditName, page)})`)
+      : ['Nothing logged yet.']),
   ].join('\n');
 }
 
@@ -185,6 +210,7 @@ export function createAuditLogService(deps: AuditLogDeps): AuditLogService {
    */
   async function appendRow(
     page: string,
+    basePage: string,
     subredditName: string,
     record: VerificationRecord,
     row: string,
@@ -207,13 +233,49 @@ export function createAuditLogService(deps: AuditLogDeps): AuditLogService {
 
       const content =
         existing === null
-          ? `${auditPageHeader(subredditName)}\n${row}`
+          ? `${auditPageHeader(subredditName, basePage)}\n${row}`
           : `${upgradeAuditHeader(existing)}\n${row}`;
       await reddit.writeWikiPage(page, content, `Verified ${record.postId}`);
     });
 
     if (result === null) {
       log.warn('audit log busy; another verification holds the lock', { postId: record.postId });
+    }
+  }
+
+  const monthsKey = `${KEY_PREFIX}:hubmonths`;
+
+  /**
+   * Makes sure the start page lists `monthPage`, rewriting it when the month
+   * is new or when `force` is set. The month list lives in Redis so the page
+   * is rebuilt whole rather than parsed and patched.
+   */
+  async function updateHub(basePage: string, monthPage: string, force: boolean): Promise<boolean> {
+    const added = await redis.zAdd(monthsKey, { member: monthPage, score: 0 });
+    if (added === 0 && !force) return true;
+
+    const subredditName = reddit.subredditName();
+    try {
+      const privacy = await reddit.ensureWikiPagePrivate(
+        basePage,
+        hubPageContent(subredditName, basePage, []),
+      );
+      if (!privacy.ok) throw new Error(privacy.reason);
+
+      const months = (await redis.zRange(monthsKey, 0, Number.MAX_SAFE_INTEGER, { by: 'score' }))
+        .map((entry) => entry.member)
+        .filter((page) => page.startsWith(`${basePage}/`));
+      await reddit.writeWikiPage(
+        basePage,
+        hubPageContent(subredditName, basePage, months),
+        'Update the start page',
+      );
+      return true;
+    } catch (error) {
+      // Forget the month so the next verification tries again.
+      if (added > 0) await redis.zRem(monthsKey, [monthPage]);
+      log.error('could not update the wiki start page', { basePage, reason: describeError(error) });
+      return false;
     }
   }
 
@@ -232,7 +294,10 @@ export function createAuditLogService(deps: AuditLogDeps): AuditLogService {
         // verifying moderator, and this app exists precisely so moderators are
         // not publicly attached to verifications - so nothing is written until
         // the page is PROVEN moderator-only. This fails closed on purpose.
-        const privacy = await reddit.ensureWikiPagePrivate(page, auditPageHeader(subredditName));
+        const privacy = await reddit.ensureWikiPagePrivate(
+          page,
+          auditPageHeader(subredditName, config.wikiLogPage),
+        );
 
         if (!privacy.ok) {
           // Skip the wiki only. Mod Discussions is a separate channel and is
@@ -243,7 +308,8 @@ export function createAuditLogService(deps: AuditLogDeps): AuditLogService {
             reason: privacy.reason,
           });
         } else {
-          await appendRow(page, subredditName, record, row);
+          await appendRow(page, config.wikiLogPage, subredditName, record, row);
+          await updateHub(config.wikiLogPage, page, false);
         }
       }
 
@@ -274,7 +340,10 @@ export function createAuditLogService(deps: AuditLogDeps): AuditLogService {
       // than wondering where a new wiki page came from.
       const before = await reddit.readWikiPage(page);
 
-      const privacy = await reddit.ensureWikiPagePrivate(page, auditPageHeader(subredditName));
+      const privacy = await reddit.ensureWikiPagePrivate(
+        page,
+        auditPageHeader(subredditName, config.wikiLogPage),
+      );
       if (!privacy.ok) {
         log.error('wiki log check failed', { page, reason: privacy.reason });
         return { kind: 'blocked', page, reason: privacy.reason };
@@ -283,9 +352,14 @@ export function createAuditLogService(deps: AuditLogDeps): AuditLogService {
       const content = before ?? (await reddit.readWikiPage(page));
       log.info('wiki log check passed', { page, existed: before !== null });
 
+      // The start page is what the moderator is sent to, so it is refreshed
+      // here even when nothing new was logged. Falls back to this month's page.
+      const hubReady = await updateHub(config.wikiLogPage, page, true);
+
       return {
         kind: 'ready',
         page,
+        openPage: hubReady ? config.wikiLogPage : page,
         rows: countRows(content),
         createdNow: before === null,
       };

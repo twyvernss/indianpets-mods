@@ -310,8 +310,28 @@ describe('check', () => {
 
     const result = await h.service.check();
 
-    expect(result).toEqual({ kind: 'ready', page: PAGE, rows: 0, createdNow: true });
+    expect(result).toEqual({
+      kind: 'ready',
+      page: PAGE,
+      openPage: 'fundraiser-verifications',
+      rows: 0,
+      createdNow: true,
+    });
     expect(h.reddit.wiki.has(PAGE)).toBe(true);
+  });
+
+  it('builds a start page that links every month and the poster history index', async () => {
+    const h = harness();
+    await h.service.record(record());
+    await h.service.record(record({ postId: 't3_old' as T3, verifiedAtMs: NOW - 40 * 86_400_000 }));
+    await h.service.check();
+
+    const hub = h.reddit.wiki.get('fundraiser-verifications') ?? '';
+    expect(hub).toContain('https://old.reddit.com/r/IndianPets/wiki/fundraiser-verifications/2026-09');
+    expect(hub).toContain('https://old.reddit.com/r/IndianPets/wiki/fundraiser-verifications/2026-08');
+    expect(hub).toContain('https://old.reddit.com/r/IndianPets/wiki/fundraiser-verifications/users');
+    expect(hub.indexOf('2026-09')).toBeLessThan(hub.indexOf('2026-08'));
+    expect(hub).not.toContain('mod_one');
   });
 
   it('seeds the new page with nothing that names a moderator', async () => {
@@ -329,7 +349,13 @@ describe('check', () => {
 
     const result = await h.service.check();
 
-    expect(result).toEqual({ kind: 'ready', page: PAGE, rows: 2, createdNow: false });
+    expect(result).toEqual({
+      kind: 'ready',
+      page: PAGE,
+      openPage: 'fundraiser-verifications',
+      rows: 2,
+      createdNow: false,
+    });
   });
 
   it('reports why nothing can be written when the page cannot be restricted', async () => {

@@ -653,23 +653,23 @@ describe('wiki check toasts', () => {
       rows: 3,
       createdNow: false,
     });
-    expect(text).toContain('fundraiser-verifications/2026-10');
-    expect(text).toContain('3 verifications logged');
+    expect(text).toContain('3 verifications this month');
     expect(text).toContain('moderator-only');
+    expect(text).toContain('start page');
   });
 
   it('says when it had to create the page, and uses the singular for one row', () => {
     expect(wikiCheckReadyToast({ page: 'p', rows: 1, createdNow: true })).toContain(
-      'Created the page',
+      "Started this month's log",
     );
     expect(wikiCheckReadyToast({ page: 'p', rows: 1, createdNow: true })).toContain(
-      '1 verification logged',
+      '1 verification this month',
     );
   });
 
   it('says nothing is logged yet rather than "0 verifications"', () => {
     expect(wikiCheckReadyToast({ page: 'p', rows: 0, createdNow: true })).toContain(
-      'no verifications logged yet',
+      'nothing verified this month yet',
     );
   });
 
@@ -677,7 +677,7 @@ describe('wiki check toasts', () => {
     const text = wikiCheckBlockedToast('Reddit said no.');
     expect(text.startsWith('Nothing will be written')).toBe(true);
     expect(text).toContain('Reddit said no.');
-    expect(text).toContain('wiki being disabled');
+    expect(text).toContain('old.reddit.com');
   });
 });
 
