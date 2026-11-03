@@ -287,10 +287,20 @@ Redis is the app's working store, not its system of record. An app **upgrade** k
 So every completed verification is also appended to a subreddit wiki page, on the scheduler so the
 moderator never waits for it:
 
-| Verified (IST) | Post | Fundraiser by | Verified by | Checklist | Notice | Mod note |
-| --- | --- | --- | --- | --- | --- | --- |
-| 28 Sep 2026, 16:43 IST | [t3_abc123](https://reddit.com) | u/op_user | u/mod_one | 2/3: Vet bill is in the OP name; Clinic contact was checked | Documents checked with the clinic | Called the clinic, bill #4471 |
+| Verified (IST) | Post | Fundraiser by | Verified by | Checklist | Notice | Mod note | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 28 Sep 2026, 16:43 IST | [t3_abc123](https://reddit.com) | u/op_user | u/mod_one | 2/3: Vet bill is in the OP name; Clinic contact was checked | Documents checked with the clinic | Called the clinic, bill #4471 | removed, 3 Nov 2026 |
 
+- **Status stays current.** It starts as `up` and changes when a moderator removes, spams or
+  approves the post, or the author deletes it (the mod action and post delete triggers queue the
+  update). Rows from before the column existed are filled in once by the upgrade backfill.
+- **Start page:** `wiki/fundraiser-verifications` itself links every month, newest first, and the
+  A–Z index of poster history pages. All pages are unlisted, so this is the page to bookmark.
+  Open them on **old.reddit.com**: new Reddit says "does not exist" for mods-only pages and for
+  every page on a subreddit whose wiki is switched off.
+- **Searching:** wiki pages cannot hold a search box. Use **Look up a poster's history** (type a
+  username), or Ctrl+F on the A–Z index or a month's page. Every past poster gets a history page
+  during the upgrade backfill.
 - The page name is a setting and may nest under an existing wiki section, e.g.
   `spotlight/fundraisers`. Pages rotate monthly (`fundraiser-verifications/2026-09`) so none approaches Reddit's size cap.
 - **Privacy is proven, not assumed.** Reddit's default wiki permission is

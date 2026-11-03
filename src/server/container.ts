@@ -129,7 +129,15 @@ export function getContainer(): Container {
     log,
     now,
   });
-  const history = createUserHistoryService({ reddit, repo, alt, settings, log, now });
+  const history = createUserHistoryService({
+    reddit,
+    redis: redisPort,
+    repo,
+    alt,
+    settings,
+    log,
+    now,
+  });
 
   instance = {
     log,

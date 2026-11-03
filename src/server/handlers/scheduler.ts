@@ -3,9 +3,11 @@ import { Hono } from 'hono';
 import { CONFIG, JOBS } from '../config.js';
 import { getContainer } from '../container.js';
 import { describeError } from '../lib/logger.js';
+import { formatShortDate } from '../lib/time.js';
 import { asPostId } from '../data/tokenRepo.js';
 import { isVerificationRecord } from '../data/verificationRepo.js';
 import { isPostContent } from '../services/altMatch.js';
+import { statusFromPost } from '../services/auditLog.js';
 import { isDuplicateFinding } from '../services/duplicates.js';
 
 export const jobs = new Hono();
@@ -288,7 +290,7 @@ jobs.post('/user-history', async (c) => {
  * nothing to do, because `record` skips posts already on the page.
  */
 jobs.post('/audit-backfill', async (c) => {
-  const { log, audit, repo, scheduler } = getContainer();
+  const { log, audit, repo, scheduler, settings, reddit } = getContainer();
 
   try {
     const request = await c.req.json<TaskRequest>();
@@ -302,10 +304,39 @@ jobs.post('/audit-backfill', async (c) => {
     }
 
     const records = await repo.getMany(postIds);
+    const config = await settings.get();
+    const authors = new Set<string>();
+
     for (const record of records) {
-      if (record.status === 'complete') await audit.record(record, { backfill: true });
+      if (record.status !== 'complete') continue;
+      await audit.record(record, { backfill: true });
+
+      // Rows written before the Status column existed get today's state once.
+      // A status an event already wrote is never overwritten.
+      const post = await reddit.getPost(record.postId);
+      await audit.setStatus({
+        postId: record.postId,
+        verifiedAtMs: record.verifiedAtMs,
+        status: statusFromPost(post),
+        onlyIfMissing: true,
+      });
+
+      const author = post?.authorName ?? record.authorName;
+      if (author) authors.add(author);
     }
-    log.info('wiki log backfill batch done', { offset, examined: records.length });
+
+    // Every past poster gets a history page, so the index lists everyone and
+    // "Look up a poster's history" has something to open for each of them.
+    if (config.userHistoryEnabled) {
+      for (const username of authors) {
+        await scheduler.runJob({
+          name: JOBS.userHistory,
+          data: { username },
+          runAt: new Date(Date.now() + CONFIG.history.delaySeconds * 1000),
+        });
+      }
+    }
+    log.info('wiki log backfill batch done', { offset, examined: records.length, authors: authors.size });
 
     if (
       postIds.length === CONFIG.audit.backfillBatchSize &&
@@ -319,6 +350,43 @@ jobs.post('/audit-backfill', async (c) => {
     }
   } catch (error) {
     log.error('wiki log backfill failed', { reason: describeError(error) });
+  }
+
+  return c.json<TaskResponse>({}, 200);
+});
+
+/**
+ * Writes a verified post's new status into its wiki log row, with the date it
+ * changed. Retries a few times when another write holds the page.
+ */
+jobs.post('/log-status', async (c) => {
+  const { log, audit, repo, scheduler } = getContainer();
+
+  try {
+    const request = await c.req.json<TaskRequest>();
+    const postId = asPostId(String(request.data?.['postId'] ?? ''));
+    const status = request.data?.['status'];
+    const attempt = readNumber(request.data, 'attempt');
+    if (!postId || typeof status !== 'string') {
+      log.warn('log-status job carried an unusable payload');
+      return c.json<TaskResponse>({}, 200);
+    }
+
+    const record = await repo.get(postId);
+    if (!record || record.status !== 'complete') return c.json<TaskResponse>({}, 200);
+
+    const label = status === 'up' ? 'up' : `${status}, ${formatShortDate(Date.now())}`;
+    const done = await audit.setStatus({ postId, verifiedAtMs: record.verifiedAtMs, status: label });
+
+    if (!done && attempt + 1 < 5) {
+      await scheduler.runJob({
+        name: JOBS.logStatus,
+        data: { postId, status, attempt: attempt + 1 },
+        runAt: new Date(Date.now() + 15_000),
+      });
+    }
+  } catch (error) {
+    log.error('log-status job failed', { reason: describeError(error) });
   }
 
   return c.json<TaskResponse>({}, 200);

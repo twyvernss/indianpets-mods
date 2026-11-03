@@ -68,12 +68,13 @@ export const CONFIG = {
     /** Delay before the append runs, keeping it off the moderator's action. */
     delaySeconds: 5,
     /**
-     * Verifications re-logged per backfill run. Each costs about six Reddit
-     * calls (privacy check, read, write), so this stays small.
+     * Verifications re-logged per backfill run. Each costs about twelve Reddit
+     * calls (row, then status: privacy check, read, write, post lookup), so
+     * this stays small to keep a run well inside the 30s request limit.
      */
-    backfillBatchSize: 5,
-    /** Ceiling on chained runs: 200 x 5 = 1,000 verifications. */
-    maxBackfillBatches: 200,
+    backfillBatchSize: 3,
+    /** Ceiling on chained runs: 400 x 3 = 1,200 verifications. */
+    maxBackfillBatches: 400,
   },
 
   /** Guard rails on moderator-written notice templates. */
@@ -207,6 +208,8 @@ export const JOBS = {
   auditLog: 'audit-log',
   /** Re-logs past verifications whose wiki row is missing. */
   auditBackfill: 'audit-backfill',
+  /** Updates a verified post's Status cell in the wiki log. */
+  logStatus: 'log-status',
   /** Fingerprints a new post and reports it if it looks like another account's. */
   altCheck: 'alt-check',
   /** Fingerprints recent posts so matching has history to compare against. */

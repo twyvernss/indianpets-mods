@@ -103,7 +103,8 @@
     "onPostSubmit": "/internal/triggers/post-submit",
     "onCommentCreate": "/internal/triggers/comment-create",
     "onPostDelete": "/internal/triggers/post-delete",
-    "onAppUpgrade": "/internal/triggers/app-upgrade"
+    "onAppUpgrade": "/internal/triggers/app-upgrade",
+    "onModAction": "/internal/triggers/mod-action"
   },
   "scheduler": {
     "tasks": {
@@ -137,6 +138,9 @@
       },
       "audit-backfill": {
         "endpoint": "/internal/jobs/audit-backfill"
+      },
+      "log-status": {
+        "endpoint": "/internal/jobs/log-status"
       }
     }
   },

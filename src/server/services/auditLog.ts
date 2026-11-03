@@ -1,3 +1,4 @@
+import type { T3 } from '@devvit/web/shared';
 import { CONFIG, KEY_PREFIX } from '../config.js';
 import type { RedisPort } from '../data/redisPort.js';
 import type { Logger } from '../lib/logger.js';
@@ -45,6 +46,20 @@ export type AuditLogService = {
    * is a poor way to discover that a subreddit has its wiki switched off.
    */
   check(): Promise<WikiLogCheck>;
+
+  /**
+   * Updates the Status cell of a verified post's row, e.g. after a moderator
+   * removes it. `onlyIfMissing` fills in rows written before the column
+   * existed without overwriting a status an event already set.
+   *
+   * Returns false only when another write held the page; the caller retries.
+   */
+  setStatus(input: {
+    postId: T3;
+    verifiedAtMs: number;
+    status: string;
+    onlyIfMissing?: boolean;
+  }): Promise<boolean>;
 };
 
 /** What {@link AuditLogService.check} found. */
@@ -127,6 +142,8 @@ export function hubPageContent(subredditName: string, basePage: string, monthPag
     '',
     'Moderators only. Kept up to date by the mod team bot - bookmark this page.',
     '',
+    `**Looking for someone?** Use "Look up a poster's history" in the subreddit's mod menu, or open the poster history pages below and press Ctrl+F (Cmd+F on a Mac). Ctrl+F works on each month's log too.`,
+    '',
     `- **[Poster history pages](${wikiPageUrl(subredditName, `${basePage}/users`)})** - one page per poster: every post with links, who verified it, and which accounts they match.`,
     '',
     '## Verification log, by month',
@@ -138,25 +155,90 @@ export function hubPageContent(subredditName: string, basePage: string, monthPag
 }
 
 const AUDIT_TABLE_HEADER =
-  '| Verified (IST) | Post | Fundraiser by | Verified by | Checklist | Notice | Mod note |';
-const AUDIT_TABLE_RULE = '| --- | --- | --- | --- | --- | --- | --- |';
+  '| Verified (IST) | Post | Fundraiser by | Verified by | Checklist | Notice | Mod note | Status |';
+const AUDIT_TABLE_RULE = '| --- | --- | --- | --- | --- | --- | --- | --- |';
+/** Cells per row. Status is last so rows written before it existed stay aligned. */
+const AUDIT_COLUMNS = 8;
 
-/** The six-column header that pages written before the note column carry. */
-const LEGACY_TABLE_HEADER = [
-  '| Verified (IST) | Post | Fundraiser by | Verified by | Checklist | Notice |',
-  '| --- | --- | --- | --- | --- | --- |',
-].join('\n');
+/** Headers that pages started by earlier versions carry, oldest first. */
+const LEGACY_TABLE_HEADERS = [
+  [
+    '| Verified (IST) | Post | Fundraiser by | Verified by | Checklist | Notice |',
+    '| --- | --- | --- | --- | --- | --- |',
+  ].join('\n'),
+  [
+    '| Verified (IST) | Post | Fundraiser by | Verified by | Checklist | Notice | Mod note |',
+    '| --- | --- | --- | --- | --- | --- | --- |',
+  ].join('\n'),
+];
+
+/** A line early pages carried, no longer true now that notes are logged. */
+const LEGACY_NOTE_LINE = 'Moderator notes are deliberately not included here.';
 
 /**
- * Widens a page started before the note column existed.
+ * Widens a page started before the note or status columns existed.
  *
- * Markdown drops cells beyond the header's width, so without this a note added
+ * Markdown drops cells beyond the header's width, so without this a cell added
  * mid-month would be written but invisible until next month's page.
  */
 export function upgradeAuditHeader(content: string): string {
-  return content.includes(LEGACY_TABLE_HEADER)
-    ? content.replace(LEGACY_TABLE_HEADER, `${AUDIT_TABLE_HEADER}\n${AUDIT_TABLE_RULE}`)
-    : content;
+  let upgraded = content.replace(`${LEGACY_NOTE_LINE}\n`, '').replace(LEGACY_NOTE_LINE, '');
+  for (const legacy of LEGACY_TABLE_HEADERS) {
+    if (upgraded.includes(legacy)) {
+      upgraded = upgraded.replace(legacy, `${AUDIT_TABLE_HEADER}\n${AUDIT_TABLE_RULE}`);
+    }
+  }
+  return upgraded;
+}
+
+/** Splits a table row into cells, respecting escaped pipes. */
+function splitRow(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/u, '')
+    .replace(/(?<!\\)\|$/u, '')
+    .split(/(?<!\\)\|/u)
+    .map((part) => part.trim());
+}
+
+/**
+ * Sets the Status cell of one post's row. Returns null when the row is not on
+ * the page, or when nothing would change - including, with `onlyIfMissing`,
+ * when the row already has a status.
+ */
+export function withStatus(
+  content: string,
+  postId: string,
+  status: string,
+  onlyIfMissing = false,
+): string | null {
+  const lines = content.split('\n');
+  const index = lines.findIndex((line) => line.startsWith('|') && line.includes(`[${postId}](`));
+  if (index < 0) return null;
+
+  const original = lines[index] ?? '';
+  const cells = splitRow(original);
+  if (onlyIfMissing && cells.length >= AUDIT_COLUMNS && (cells[AUDIT_COLUMNS - 1] ?? '') !== '') {
+    return null;
+  }
+
+  // A row from before the note column existed is padded, so the status lands
+  // under "Status" rather than under "Mod note".
+  while (cells.length < AUDIT_COLUMNS - 1) cells.push('-');
+  cells[AUDIT_COLUMNS - 1] = cell(status);
+  const updated = `| ${cells.slice(0, AUDIT_COLUMNS).join(' | ')} |`;
+  if (updated === original) return null;
+
+  lines[index] = updated;
+  return lines.join('\n');
+}
+
+/** What the Status cell says about a post, read from Reddit now. */
+export function statusFromPost(post: { authorName: string | null; isRemoved: boolean } | null): string {
+  if (!post) return 'deleted';
+  if (post.isRemoved) return 'removed';
+  if (!post.authorName) return 'deleted by author';
+  return 'up';
 }
 
 export function auditRow(record: VerificationRecord, subredditName: string): string {
@@ -175,6 +257,8 @@ export function auditRow(record: VerificationRecord, subredditName: string): str
     cell(checklistCell(record)),
     cell(record.templateLabel ?? 'default'),
     cell(record.note.length > 0 ? record.note : '-'),
+    // Verifying approves the post, so it starts out up.
+    'up',
   ];
   return `| ${cells.join(' | ')} |`;
 }
@@ -326,6 +410,32 @@ export function createAuditLogService(deps: AuditLogDeps): AuditLogService {
           });
         }
       }
+    },
+
+    async setStatus({ postId, verifiedAtMs, status, onlyIfMissing = false }): Promise<boolean> {
+      const config = await settings.get();
+      if (!config.enabled || !config.wikiLogEnabled) return true;
+
+      const subredditName = reddit.subredditName();
+      const page = auditPageName(config.wikiLogPage, verifiedAtMs);
+      const privacy = await reddit.ensureWikiPagePrivate(
+        page,
+        auditPageHeader(subredditName, config.wikiLogPage),
+      );
+      if (!privacy.ok) {
+        log.error('status not written: page could not be confirmed moderator-only', { page, postId });
+        return true;
+      }
+
+      const result = await withLock(async () => {
+        const existing = await reddit.readWikiPage(page);
+        if (existing === null) return;
+        const updated = withStatus(upgradeAuditHeader(existing), postId, status, onlyIfMissing);
+        if (updated === null) return;
+        await reddit.writeWikiPage(page, updated, `Status of ${postId}: ${status}`);
+      });
+
+      return result !== null;
     },
 
     async check(): Promise<WikiLogCheck> {

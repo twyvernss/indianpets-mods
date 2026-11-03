@@ -1,10 +1,12 @@
 import type {
   OnAutomoderatorFilterPostRequest,
+  OnModActionRequest,
   OnCommentCreateRequest,
   OnCommentSubmitRequest,
   OnPostDeleteRequest,
   OnPostSubmitRequest,
 } from '@devvit/web/shared';
+import type { T3 } from '@devvit/web/shared';
 import { Hono } from 'hono';
 import { CONFIG, JOBS } from '../config.js';
 import { getContainer } from '../container.js';
@@ -12,6 +14,30 @@ import { asPostId } from '../data/tokenRepo.js';
 import { describeError } from '../lib/logger.js';
 
 export const triggers = new Hono();
+
+/**
+ * Queues a Status update for the wiki log row of a verified post.
+ *
+ * One Redis read decides whether the post was ever verified; every other post
+ * stops there. The wiki write itself needs Reddit calls, so it is a job.
+ */
+async function queueStatus(postId: T3, status: string): Promise<void> {
+  const { repo, scheduler } = getContainer();
+  const record = await repo.get(postId);
+  if (!record || record.status !== 'complete') return;
+  await scheduler.runJob({
+    name: JOBS.logStatus,
+    data: { postId, status, attempt: 0 },
+    runAt: new Date(Date.now() + 5_000),
+  });
+}
+
+/** Moderator actions on a post that change what its Status cell should say. */
+const STATUS_FOR_ACTION: Readonly<Record<string, string>> = {
+  removelink: 'removed',
+  spamlink: 'removed as spam',
+  approvelink: 'up',
+};
 
 /**
  * Trigger handlers must return fast and must tolerate being called more than
@@ -205,6 +231,7 @@ triggers.post('/post-delete', async (c) => {
         repo.markDeleted(postId, parseIsoMs(body.deletedAt, Date.now())),
         duplicates.forgetPost(postId),
         byAuthor ? alt.forgetPost(postId) : Promise.resolve(),
+        queueStatus(postId, byAuthor ? 'deleted by author' : 'removed'),
       ]);
       log.info('post deleted; stored content scrubbed and links released', { postId });
     }
@@ -249,6 +276,26 @@ triggers.post('/app-upgrade', async (c) => {
     log.info('queued author history, fingerprint and wiki log backfills after upgrade');
   } catch (error) {
     log.error('app-upgrade trigger failed', { reason: describeError(error) });
+  }
+
+  return c.json({ status: 'ok' });
+});
+
+/**
+ * A moderator acted on something. Only post removals, spam and approvals
+ * matter here, and only for posts this app verified: they update the Status
+ * column of the wiki log so it says whether the fundraiser is still up.
+ */
+triggers.post('/mod-action', async (c) => {
+  const { log } = getContainer();
+
+  try {
+    const body = await c.req.json<OnModActionRequest>();
+    const status = STATUS_FOR_ACTION[body.action ?? ''];
+    const postId = asPostId(body.targetPost?.id ?? '');
+    if (status && postId) await queueStatus(postId, status);
+  } catch (error) {
+    log.error('mod-action trigger failed', { reason: describeError(error) });
   }
 
   return c.json({ status: 'ok' });

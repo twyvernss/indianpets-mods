@@ -7,7 +7,9 @@ import {
   countRows,
   createAuditLogService,
   modDiscussionBody,
+  statusFromPost,
   upgradeAuditHeader,
+  withStatus,
 } from '../services/auditLog.js';
 import { judgeWikiPrivacy } from '../lib/wikiPrivacy.js';
 import type { AppSettings } from '../settings.js';
@@ -82,8 +84,19 @@ describe('row rendering', () => {
     expect(auditPageHeader('IndianPets')).toContain('| Mod note |');
   });
 
-  it('shows a dash rather than an empty cell when there is no note', () => {
-    expect(auditRow(record({ note: '' }), 'IndianPets').endsWith('| - |')).toBe(true);
+  it('shows a dash rather than an empty cell when there is no note, and starts the post as up', () => {
+    expect(auditRow(record({ note: '' }), 'IndianPets').endsWith('| - | up |')).toBe(true);
+  });
+
+  it('widens a seven-column page to add Status, and drops the old "notes not included" line', () => {
+    const legacy = [
+      'Written automatically. Moderator notes are deliberately not included here.',
+      '| Verified (IST) | Post | Fundraiser by | Verified by | Checklist | Notice | Mod note |',
+      '| --- | --- | --- | --- | --- | --- | --- |',
+    ].join('\n');
+    const upgraded = upgradeAuditHeader(legacy);
+    expect(upgraded).toContain('| Mod note | Status |');
+    expect(upgraded).not.toContain('deliberately not included');
   });
 
   it('widens a page started before the note column existed', () => {
@@ -98,6 +111,50 @@ describe('row rendering', () => {
     expect(upgraded).toContain('| --- | --- | --- | --- | --- | --- | --- |');
     expect(upgraded).toContain('| a | b | c | d | e | f |');
     expect(upgradeAuditHeader(upgraded)).toBe(upgraded);
+  });
+
+  it('sets the status of one row and leaves the others alone', () => {
+    const page = [
+      auditPageHeader('IndianPets'),
+      auditRow(record({ postId: 't3_one' as T3 }), 'IndianPets'),
+      auditRow(record({ postId: 't3_two' as T3 }), 'IndianPets'),
+    ].join('\n');
+
+    const updated = withStatus(page, 't3_one', 'removed, 3 Nov 2026') ?? '';
+    const lines = updated.split('\n');
+    expect(lines.find((line) => line.includes('t3_one'))?.endsWith('| removed, 3 Nov 2026 |')).toBe(true);
+    expect(lines.find((line) => line.includes('t3_two'))?.endsWith('| up |')).toBe(true);
+  });
+
+  it('pads an old six-cell row so the status lands under Status', () => {
+    const row = '| a | [t3_old](link) | c | d | e | f |';
+    const updated = withStatus(row, 't3_old', 'up') ?? '';
+    expect(updated).toBe('| a | [t3_old](link) | c | d | e | f | - | up |');
+  });
+
+  it('keeps escaped pipes inside a cell', () => {
+    const row = auditRow(record({ note: 'bill | receipt' }), 'IndianPets');
+    expect(withStatus(row, 't3_abc123', 'removed')).toContain('bill \\| receipt | removed |');
+  });
+
+  it('only fills a missing status when asked to', () => {
+    const row = auditRow(record(), 'IndianPets');
+    expect(withStatus(row, 't3_abc123', 'removed', true)).toBeNull();
+    const old = '| a | [t3_abc123](l) | c | d | e | f | g |';
+    expect(withStatus(old, 't3_abc123', 'removed', true)).toBe(
+      '| a | [t3_abc123](l) | c | d | e | f | g | removed |',
+    );
+  });
+
+  it('returns null for a post that is not on the page', () => {
+    expect(withStatus(auditPageHeader('IndianPets'), 't3_missing', 'up')).toBeNull();
+  });
+
+  it('reads a status from the post as Reddit has it now', () => {
+    expect(statusFromPost(null)).toBe('deleted');
+    expect(statusFromPost({ authorName: 'x', isRemoved: true })).toBe('removed');
+    expect(statusFromPost({ authorName: null, isRemoved: false })).toBe('deleted by author');
+    expect(statusFromPost({ authorName: 'x', isRemoved: false })).toBe('up');
   });
 
   it('escapes pipes so one row cannot break the table', () => {
@@ -170,6 +227,28 @@ describe('writing the log', () => {
     h.reddit.wiki.set(PAGE, 'x'.repeat(500_000));
     await h.service.record(record());
     expect(h.reddit.wiki.get(PAGE)).toBe('x'.repeat(500_000));
+  });
+});
+
+describe('setStatus', () => {
+  it('updates the row on the month page the post was verified in', async () => {
+    const h = harness();
+    await h.service.record(record());
+    const done = await h.service.setStatus({
+      postId: 't3_abc123' as T3,
+      verifiedAtMs: NOW,
+      status: 'removed, 28 Sep 2026',
+    });
+    expect(done).toBe(true);
+    expect(h.reddit.wiki.get(PAGE)).toContain('| removed, 28 Sep 2026 |');
+  });
+
+  it('writes nothing for a post that was never logged', async () => {
+    const h = harness();
+    await h.service.record(record());
+    const before = h.reddit.wiki.get(PAGE);
+    await h.service.setStatus({ postId: 't3_other' as T3, verifiedAtMs: NOW, status: 'removed' });
+    expect(h.reddit.wiki.get(PAGE)).toBe(before);
   });
 });
 

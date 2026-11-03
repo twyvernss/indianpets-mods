@@ -6,6 +6,7 @@ import { createVerificationRepo } from '../data/verificationRepo.js';
 import { createAltService } from '../services/altMatch.js';
 import {
   buildHistoryPage,
+  buildUserIndex,
   createUserHistoryService,
   mergeHistoryRows,
   userHistoryPageName,
@@ -94,6 +95,17 @@ describe('history page', () => {
     expect(page).not.toContain('Please help');
   });
 
+  it('builds an A-Z index with one heading per letter and no duplicates', () => {
+    const index = buildUserIndex('IndianPets', 'fundraiser-verifications', ['zed', 'Alice', 'bob', 'alice', '_under']);
+    expect(index).toContain('Ctrl+F');
+    expect(index.indexOf('### A')).toBeLessThan(index.indexOf('### B'));
+    expect(index.indexOf('### B')).toBeLessThan(index.indexOf('### Z'));
+    expect(index.split('u/Alice').length - 1).toBe(1);
+    expect(index).not.toContain('u/alice]');
+    expect(index).toContain('### #');
+    expect(index).toContain('https://old.reddit.com/r/IndianPets/wiki/fundraiser-verifications/users/bob');
+  });
+
   it('uses a safe, lower-case page name', () => {
     expect(userHistoryPageName('fundraiser-verifications', 'Op_User')).toBe(
       'fundraiser-verifications/users/op_user',
@@ -116,7 +128,15 @@ function harness(overrides: Partial<AppSettings> = {}) {
     log: fakeLogger(),
     now: () => NOW,
   });
-  const service = createUserHistoryService({ reddit, repo, alt, settings, log: fakeLogger(), now: () => NOW });
+  const service = createUserHistoryService({
+    reddit,
+    redis,
+    repo,
+    alt,
+    settings,
+    log: fakeLogger(),
+    now: () => NOW,
+  });
   return { reddit, repo, service };
 }
 

@@ -1,5 +1,6 @@
 import type { T3 } from '@devvit/web/shared';
-import { CONFIG } from '../config.js';
+import { CONFIG, KEY_PREFIX } from '../config.js';
+import type { RedisPort } from '../data/redisPort.js';
 import type { VerificationRepo } from '../data/verificationRepo.js';
 import type { Logger } from '../lib/logger.js';
 import { formatDisplayDate, formatShortDate } from '../lib/time.js';
@@ -34,6 +35,7 @@ export type HistoryResult =
 
 export type UserHistoryDeps = {
   reddit: RedditPort;
+  redis: RedisPort;
   repo: VerificationRepo;
   alt: AltService;
   settings: SettingsReader;
@@ -47,6 +49,44 @@ export function userHistoryPageName(basePage: string, username: string): string 
 
 export function userIndexPageName(basePage: string): string {
   return `${basePage}/users`;
+}
+
+/** Every username with a history page. Score is always 0; members sort by name. */
+const INDEX_KEY = `${KEY_PREFIX}:hist:users`;
+
+/**
+ * The A-Z index of history pages, one heading per letter.
+ *
+ * Case is folded when sorting and when removing duplicates, because Reddit
+ * usernames are case-insensitive and the same person can arrive spelt two ways.
+ */
+export function buildUserIndex(subredditName: string, basePage: string, usernames: readonly string[]): string {
+  const unique = new Map<string, string>();
+  for (const name of usernames) {
+    if (!unique.has(name.toLowerCase())) unique.set(name.toLowerCase(), name);
+  }
+  const sorted = [...unique.entries()].sort(([a], [b]) => a.localeCompare(b));
+
+  const lines = [
+    '# Poster history pages',
+    '',
+    'One page per poster, rebuilt by the mod team bot. Moderators only.',
+    `Press Ctrl+F (Cmd+F on a Mac) to find someone, or use "Look up a poster's history" in the mod menu.`,
+    '',
+    `[Back to all fundraiser records](${wikiPageUrl(subredditName, basePage)})`,
+  ];
+  if (sorted.length === 0) lines.push('', 'Nobody yet.');
+
+  let letter = '';
+  for (const [lower, name] of sorted) {
+    const first = /[a-z]/u.test(lower[0] ?? '') ? (lower[0] ?? '').toUpperCase() : '#';
+    if (first !== letter) {
+      letter = first;
+      lines.push('', `### ${letter}`, '');
+    }
+    lines.push(`- [u/${name}](${wikiPageUrl(subredditName, userHistoryPageName(basePage, name))})`);
+  }
+  return lines.join('\n');
 }
 
 /** Seed content for a new page. Names nobody, so it is safe before privacy is proven. */
@@ -177,30 +217,34 @@ export function buildHistoryPage(input: {
 }
 
 export function createUserHistoryService(deps: UserHistoryDeps): UserHistoryService {
-  const { reddit, repo, alt, settings, log, now } = deps;
+  const { reddit, redis, repo, alt, settings, log, now } = deps;
 
-  /** Adds the person to the list of history pages, once. Self-healing on every rebuild. */
+  /**
+   * Lists the person on the A-Z index of history pages.
+   *
+   * The names live in Redis and the page is rebuilt whole and sorted whenever
+   * someone new is added, so the index stays alphabetical - which is what
+   * makes it searchable with Ctrl+F. A page missing this person (written by an
+   * older version, say) is rebuilt too, so the index heals itself.
+   */
   async function addToIndex(basePage: string, username: string, page: string): Promise<void> {
     const indexPage = userIndexPageName(basePage);
-    const header = [
-      '# Poster history pages',
-      '',
-      'One page per poster, rebuilt by the mod team bot. Moderators only.',
-      `[Back to all fundraiser records](${wikiPageUrl(reddit.subredditName(), basePage)})`,
-      '',
-    ].join('\n');
+    const subredditName = reddit.subredditName();
 
-    const privacy = await reddit.ensureWikiPagePrivate(indexPage, header);
+    const privacy = await reddit.ensureWikiPagePrivate(indexPage, buildUserIndex(subredditName, basePage, []));
     if (!privacy.ok) {
       log.error('skipping the history index: not confirmed moderator-only', { reason: privacy.reason });
       return;
     }
 
-    const existing = (await reddit.readWikiPage(indexPage)) ?? header;
-    // Matched on the path, so entries written with an older link style still count.
-    if (existing.includes(`/wiki/${page})`)) return;
-    const link = wikiPageUrl(reddit.subredditName(), page);
-    await reddit.writeWikiPage(indexPage, `${existing}\n- [u/${username}](${link})`, `Add u/${username}`);
+    const added = await redis.zAdd(INDEX_KEY, { member: username, score: 0 });
+    const existing = (await reddit.readWikiPage(indexPage)) ?? '';
+    if (added === 0 && existing.includes(wikiPageUrl(subredditName, page))) return;
+
+    const names = (await redis.zRange(INDEX_KEY, 0, Number.MAX_SAFE_INTEGER, { by: 'score' })).map(
+      (entry) => entry.member,
+    );
+    await reddit.writeWikiPage(indexPage, buildUserIndex(subredditName, basePage, names), `Add u/${username}`);
   }
 
   return {
