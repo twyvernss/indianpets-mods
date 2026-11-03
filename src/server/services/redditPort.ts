@@ -20,6 +20,8 @@ export type PostSnapshot = {
   flairText: string | null;
 };
 
+export type PostState = 'up' | 'removed' | 'deleted' | 'unknown';
+
 /** Author facts used only to annotate a modqueue report. */
 export type AuthorSnapshot = {
   username: string;
@@ -77,6 +79,13 @@ export type RedditPort = {
   isModerator(username: string): Promise<boolean>;
   /** Returns null when the post does not exist or cannot be read. */
   getPost(postId: T3): Promise<PostSnapshot | null>;
+  /**
+   * Whether a post is up, removed by a moderator (or as spam), or deleted by
+   * its author - and, unlike `getPost`, `unknown` when Reddit could not be
+   * asked. Anything that would stop chasing or scrub a record must treat
+   * `unknown` as "try again later", never as "gone".
+   */
+  getPostState(postId: T3): Promise<PostState>;
   approvePost(postId: T3): Promise<void>;
   submitAppComment(postId: T3, text: string): Promise<CommentHandle>;
 

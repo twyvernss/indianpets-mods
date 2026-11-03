@@ -272,7 +272,9 @@ export function buildDuplicateReportReason(
 type MatchSummary = {
   author: string;
   shared: Partial<Record<'upi' | 'phone' | 'bank' | 'link', number>>;
+  commonShared?: number;
   textSimilarity: number;
+  wordingIsCommon?: boolean;
   banned: boolean;
 };
 
@@ -291,7 +293,13 @@ export function describeMatch(match: MatchSummary): string {
 
   const parts: string[] = [];
   if (things.length > 0) parts.push(`same ${things.join(', ')}`);
-  if (match.textSimilarity >= 0.3) parts.push(`${Math.round(match.textSimilarity * 100)}% same wording`);
+  if (match.textSimilarity >= 0.3) {
+    const wording = `${Math.round(match.textSimilarity * 100)}% same wording`;
+    parts.push(match.wordingIsCommon ? `${wording} (a template many use)` : wording);
+  }
+  // Last, so a report reason that runs out of room drops the weakest fact.
+  const common = match.commonShared ?? 0;
+  if (common > 0) parts.push(`${common} detail${common === 1 ? '' : 's'} many accounts use`);
   return parts.join('; ');
 }
 

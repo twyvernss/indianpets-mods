@@ -53,6 +53,20 @@ export function isTransientError(error: unknown): boolean {
 }
 
 /**
+ * The failures after which a NON-idempotent write - a new comment, a report, a
+ * modmail - is safe to send again: ones where Reddit refused the request
+ * outright. A timeout is not one of them. Reddit can create the comment and
+ * then time out answering, and resending would post it twice on someone's
+ * fundraiser, which is far worse than a failure the moderator is told about.
+ */
+export function isRefusedError(error: unknown): boolean {
+  const message = describeError(error).toLowerCase();
+  return ['429', 'rate limit', 'ratelimit', 'too many requests', '503', 'service unavailable'].some(
+    (marker) => message.includes(marker),
+  );
+}
+
+/**
  * Runs `operation`, retrying only transient failures with exponential backoff
  * and full jitter. Gives up early if the next wait would cross the budget, so
  * the caller always has time left to answer inside Devvit's 30s request limit.
@@ -63,6 +77,7 @@ export async function withRetry<T>(
   log: Logger,
   label: string,
   env: RetryEnvironment = defaultRetryEnvironment,
+  retryable: (error: unknown) => boolean = isTransientError,
 ): Promise<T> {
   const deadline = env.now() + options.budgetMs;
   let lastError: unknown;
@@ -73,7 +88,7 @@ export async function withRetry<T>(
     } catch (error) {
       lastError = error;
 
-      if (!isTransientError(error) || attempt === options.attempts) {
+      if (!retryable(error) || attempt === options.attempts) {
         throw error;
       }
 

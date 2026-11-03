@@ -72,6 +72,8 @@ describe('history page', () => {
         author: 'old_alt',
         score: 9,
         shared: { upi: 1 },
+        commonShared: 0,
+        wordingIsCommon: false,
         textSimilarity: 0.8,
         postIds: ['t3_zzz' as T3],
         banned: true,

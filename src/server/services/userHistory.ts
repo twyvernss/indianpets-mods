@@ -1,6 +1,7 @@
 import type { T3 } from '@devvit/web/shared';
 import { CONFIG, KEY_PREFIX } from '../config.js';
 import type { RedisPort } from '../data/redisPort.js';
+import { allByScore } from '../data/redisPort.js';
 import type { VerificationRepo } from '../data/verificationRepo.js';
 import type { Logger } from '../lib/logger.js';
 import { formatDisplayDate, formatShortDate } from '../lib/time.js';
@@ -78,13 +79,29 @@ export function buildUserIndex(subredditName: string, basePage: string, username
   if (sorted.length === 0) lines.push('', 'Nobody yet.');
 
   let letter = '';
+  let size = lines.join('\n').length;
+  let listed = 0;
   for (const [lower, name] of sorted) {
+    const entry = `- [u/${name}](${wikiPageUrl(subredditName, userHistoryPageName(basePage, name))})`;
+    // Reddit refuses a wiki page much over 512 KB. A subreddit that outgrows
+    // one page still has every history page; the lookup action finds them.
+    if (size + entry.length + 12 > CONFIG.audit.maxPageBytes) break;
+
     const first = /[a-z]/u.test(lower[0] ?? '') ? (lower[0] ?? '').toUpperCase() : '#';
     if (first !== letter) {
       letter = first;
       lines.push('', `### ${letter}`, '');
+      size += letter.length + 6;
     }
-    lines.push(`- [u/${name}](${wikiPageUrl(subredditName, userHistoryPageName(basePage, name))})`);
+    lines.push(entry);
+    size += entry.length + 1;
+    listed += 1;
+  }
+  if (listed < sorted.length) {
+    lines.push(
+      '',
+      `*${sorted.length - listed} more posters have history pages that do not fit here. Use "Look up a poster's history" to open them.*`,
+    );
   }
   return lines.join('\n');
 }
@@ -241,9 +258,7 @@ export function createUserHistoryService(deps: UserHistoryDeps): UserHistoryServ
     const existing = (await reddit.readWikiPage(indexPage)) ?? '';
     if (added === 0 && existing.includes(wikiPageUrl(subredditName, page))) return;
 
-    const names = (await redis.zRange(INDEX_KEY, 0, Number.MAX_SAFE_INTEGER, { by: 'score' })).map(
-      (entry) => entry.member,
-    );
+    const names = await allByScore(redis, INDEX_KEY);
     await reddit.writeWikiPage(indexPage, buildUserIndex(subredditName, basePage, names), `Add u/${username}`);
   }
 

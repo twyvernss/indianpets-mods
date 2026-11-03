@@ -1,12 +1,13 @@
 import type { T3 } from '@devvit/web/shared';
 import { CONFIG, KEY_PREFIX } from '../config.js';
 import type { RedisPort } from '../data/redisPort.js';
+import { allByScore } from '../data/redisPort.js';
 import type { Logger } from '../lib/logger.js';
 import { describeError } from '../lib/logger.js';
 import { formatDisplayDate } from '../lib/time.js';
 import type { SettingsReader } from '../settings.js';
 import type { VerificationRecord } from '../types.js';
-import type { RedditPort } from './redditPort.js';
+import type { PostState, RedditPort } from './redditPort.js';
 
 /**
  * A durable, human-readable record of every verification, kept OUTSIDE Redis.
@@ -33,9 +34,20 @@ export type AuditLogService = {
    * Appends one verification. Called from a scheduled job, never inline.
    *
    * `backfill` re-logs an old verification: the wiki row is written if it is
-   * missing, but nothing is re-posted to Mod Discussions.
+   * missing, but nothing is re-posted to Mod Discussions. `quiet` skips Mod
+   * Discussions too, for a retry of a fresh verification.
+   *
+   * Returns true once the row is on the wiki - written now or already there.
    */
-  record(record: VerificationRecord, options?: { backfill?: boolean }): Promise<void>;
+  record(record: VerificationRecord, options?: { backfill?: boolean; quiet?: boolean }): Promise<boolean>;
+
+  /**
+   * Remembers that a verification's row and status are on the wiki, so the
+   * install/upgrade backfill never spends Reddit calls on it again.
+   */
+  markLogged(postId: T3): Promise<void>;
+  /** Which of these posts are already fully logged. One batched read. */
+  loggedAmong(postIds: readonly T3[]): Promise<Set<T3>>;
 
   /**
    * Proves, on demand, that the wiki log is actually working.
@@ -233,12 +245,18 @@ export function withStatus(
   return lines.join('\n');
 }
 
-/** What the Status cell says about a post, read from Reddit now. */
-export function statusFromPost(post: { authorName: string | null; isRemoved: boolean } | null): string {
-  if (!post) return 'deleted';
-  if (post.isRemoved) return 'removed';
-  if (!post.authorName) return 'deleted by author';
-  return 'up';
+/** What the Status cell says about a post, or null when Reddit could not be asked. */
+export function statusFromState(state: PostState): string | null {
+  switch (state) {
+    case 'up':
+      return 'up';
+    case 'removed':
+      return 'removed';
+    case 'deleted':
+      return 'deleted by author';
+    case 'unknown':
+      return null;
+  }
 }
 
 export function auditRow(record: VerificationRecord, subredditName: string): string {
@@ -269,8 +287,9 @@ export function createAuditLogService(deps: AuditLogDeps): AuditLogService {
 
   /**
    * The wiki append is a read-modify-write, so two verifications landing at
-   * once could lose a row. A short Redis lock serialises them; the loser is
-   * simply retried by the scheduler's own redelivery.
+   * once could lose a row. A short Redis lock serialises them; the loser's
+   * job queues itself again a few times, and the install/upgrade backfill
+   * catches anything that still slipped through.
    */
   async function withLock<T>(operation: () => Promise<T>): Promise<T | null> {
     const owner = `${now()}-${Math.random()}`;
@@ -298,7 +317,7 @@ export function createAuditLogService(deps: AuditLogDeps): AuditLogService {
     subredditName: string,
     record: VerificationRecord,
     row: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const result = await withLock(async () => {
       const existing = await reddit.readWikiPage(page);
 
@@ -306,13 +325,13 @@ export function createAuditLogService(deps: AuditLogDeps): AuditLogService {
       // over. Rotating monthly makes this a safety net, not a routine event.
       if (existing !== null && existing.length > CONFIG.audit.maxPageBytes) {
         log.warn('audit log page is full; skipping this row', { page });
-        return;
+        return false;
       }
 
       // Guard against a redelivered job writing the same row twice.
       if (existing !== null && existing.includes(record.postId)) {
         log.info('audit log already contains this post', { page, postId: record.postId });
-        return;
+        return true;
       }
 
       const content =
@@ -320,11 +339,22 @@ export function createAuditLogService(deps: AuditLogDeps): AuditLogService {
           ? `${auditPageHeader(subredditName, basePage)}\n${row}`
           : `${upgradeAuditHeader(existing)}\n${row}`;
       await reddit.writeWikiPage(page, content, `Verified ${record.postId}`);
+      return true;
     });
 
     if (result === null) {
+      // Not lost: the row is not marked as logged, so the next install or
+      // upgrade backfill writes it.
       log.warn('audit log busy; another verification holds the lock', { postId: record.postId });
+      return false;
     }
+    return result;
+  }
+
+  const loggedKey = (postId: T3): string => `${KEY_PREFIX}:logged:${postId}`;
+
+  async function markLogged(postId: T3): Promise<void> {
+    await redis.set(loggedKey(postId), '1');
   }
 
   const monthsKey = `${KEY_PREFIX}:hubmonths`;
@@ -346,8 +376,7 @@ export function createAuditLogService(deps: AuditLogDeps): AuditLogService {
       );
       if (!privacy.ok) throw new Error(privacy.reason);
 
-      const months = (await redis.zRange(monthsKey, 0, Number.MAX_SAFE_INTEGER, { by: 'score' }))
-        .map((entry) => entry.member)
+      const months = (await allByScore(redis, monthsKey))
         .filter((page) => page.startsWith(`${basePage}/`));
       await reddit.writeWikiPage(
         basePage,
@@ -364,9 +393,10 @@ export function createAuditLogService(deps: AuditLogDeps): AuditLogService {
   }
 
   return {
-    async record(record, options = {}): Promise<void> {
+    async record(record, options = {}): Promise<boolean> {
       const config = await settings.get();
-      if (!config.enabled) return;
+      if (!config.enabled) return false;
+      let onPage = false;
 
       const subredditName = reddit.subredditName();
       const row = auditRow(record, subredditName);
@@ -392,12 +422,15 @@ export function createAuditLogService(deps: AuditLogDeps): AuditLogService {
             reason: privacy.reason,
           });
         } else {
-          await appendRow(page, config.wikiLogPage, subredditName, record, row);
+          onPage = await appendRow(page, config.wikiLogPage, subredditName, record, row);
           await updateHub(config.wikiLogPage, page, false);
+          // A fresh row is complete, status included. A backfilled one is
+          // marked by the backfill once its status is filled in too.
+          if (onPage && !options.backfill) await markLogged(record.postId);
         }
       }
 
-      if (config.modmailLogEnabled && !options.backfill) {
+      if (config.modmailLogEnabled && !options.backfill && !options.quiet) {
         try {
           await reddit.sendModDiscussion(
             `Fundraiser verified: ${record.postId}`,
@@ -410,6 +443,16 @@ export function createAuditLogService(deps: AuditLogDeps): AuditLogService {
           });
         }
       }
+
+      return onPage;
+    },
+
+    markLogged,
+
+    async loggedAmong(postIds): Promise<Set<T3>> {
+      if (postIds.length === 0) return new Set();
+      const flags = await redis.mGet(postIds.map(loggedKey));
+      return new Set(postIds.filter((_, index) => flags[index] === '1'));
     },
 
     async setStatus({ postId, verifiedAtMs, status, onlyIfMissing = false }): Promise<boolean> {

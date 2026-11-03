@@ -50,3 +50,41 @@ export function parseJson<T>(raw: string | null | undefined, validate: (value: u
   }
   return validate(parsed) ? parsed : null;
 }
+
+/**
+ * The `limit` newest members of a sorted set scored by time.
+ *
+ * Redis reads a REVERSED score range as (highest, lowest). Passing the range
+ * the natural way round, (0, max), returns nothing at all - which silently
+ * emptied every "newest first" read in this app until it was caught. Every
+ * newest-first read goes through here so it cannot happen again.
+ */
+export async function newestByScore(
+  redis: RedisPort,
+  key: string,
+  limit: number,
+): Promise<{ member: string; score: number }[]> {
+  return redis.zRange(key, Number.MAX_SAFE_INTEGER, 0, {
+    by: 'score',
+    reverse: true,
+    limit: { offset: 0, count: limit },
+  });
+}
+
+/**
+ * Every member of a sorted set, lowest score first, read in pages.
+ *
+ * Devvit returns at most 1,000 members from a score range when no `limit` is
+ * given, so anything that can grow past that is read page by page.
+ */
+export async function allByScore(redis: RedisPort, key: string, pageSize = 1000): Promise<string[]> {
+  const members: string[] = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const page = await redis.zRange(key, 0, Number.MAX_SAFE_INTEGER, {
+      by: 'score',
+      limit: { offset, count: pageSize },
+    });
+    members.push(...page.map((entry) => entry.member));
+    if (page.length < pageSize) return members;
+  }
+}

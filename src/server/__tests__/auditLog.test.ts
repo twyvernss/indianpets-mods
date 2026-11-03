@@ -7,7 +7,7 @@ import {
   countRows,
   createAuditLogService,
   modDiscussionBody,
-  statusFromPost,
+  statusFromState,
   upgradeAuditHeader,
   withStatus,
 } from '../services/auditLog.js';
@@ -150,11 +150,11 @@ describe('row rendering', () => {
     expect(withStatus(auditPageHeader('IndianPets'), 't3_missing', 'up')).toBeNull();
   });
 
-  it('reads a status from the post as Reddit has it now', () => {
-    expect(statusFromPost(null)).toBe('deleted');
-    expect(statusFromPost({ authorName: 'x', isRemoved: true })).toBe('removed');
-    expect(statusFromPost({ authorName: null, isRemoved: false })).toBe('deleted by author');
-    expect(statusFromPost({ authorName: 'x', isRemoved: false })).toBe('up');
+  it('reads a status from the post state, and writes nothing when Reddit could not be asked', () => {
+    expect(statusFromState('up')).toBe('up');
+    expect(statusFromState('removed')).toBe('removed');
+    expect(statusFromState('deleted')).toBe('deleted by author');
+    expect(statusFromState('unknown')).toBeNull();
   });
 
   it('escapes pipes so one row cannot break the table', () => {
@@ -249,6 +249,29 @@ describe('setStatus', () => {
     const before = h.reddit.wiki.get(PAGE);
     await h.service.setStatus({ postId: 't3_other' as T3, verifiedAtMs: NOW, status: 'removed' });
     expect(h.reddit.wiki.get(PAGE)).toBe(before);
+  });
+});
+
+describe('logged markers', () => {
+  it('marks a fresh verification as fully logged, so a later backfill skips it', async () => {
+    const h = harness();
+    await expect(h.service.record(record())).resolves.toBe(true);
+    expect(await h.service.loggedAmong(['t3_abc123' as T3, 't3_other' as T3])).toEqual(
+      new Set(['t3_abc123']),
+    );
+  });
+
+  it('leaves a backfilled row unmarked until the backfill has also set its status', async () => {
+    const h = harness();
+    await h.service.record(record(), { backfill: true });
+    expect((await h.service.loggedAmong(['t3_abc123' as T3])).size).toBe(0);
+  });
+
+  it('does not mark a row that never reached the wiki', async () => {
+    const h = harness();
+    h.reddit.wikiPrivate = false;
+    await expect(h.service.record(record())).resolves.toBe(false);
+    expect((await h.service.loggedAmong(['t3_abc123' as T3])).size).toBe(0);
   });
 });
 

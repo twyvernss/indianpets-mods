@@ -511,7 +511,15 @@ export function createSettingsReader(
 ): SettingsReader {
   let cachedBase: Record<string, unknown> | null = null;
   let cachedAtMs = 0;
+  let lastPatch: Record<string, unknown> | null = null;
 
+  /*
+   * When settings cannot be read, the LAST settings that were read are used.
+   * With none to fall back on, this throws rather than inventing defaults:
+   * the defaults switch every feature on, and a community that turned one off
+   * must not have it come back during an outage. Every caller already treats
+   * a throw as "do nothing and log it".
+   */
   return {
     async get(): Promise<AppSettings> {
       const timestamp = now();
@@ -519,20 +527,19 @@ export function createSettingsReader(
       if (cachedBase === null || timestamp - cachedAtMs >= ttlMs) {
         try {
           cachedBase = await port.getAll();
-        } catch {
-          cachedBase = cachedBase ?? {};
+          cachedAtMs = timestamp;
+        } catch (error) {
+          if (cachedBase === null) throw error;
         }
-        cachedAtMs = timestamp;
       }
 
-      let patch: Record<string, unknown> = {};
       try {
-        patch = await overrides.read();
-      } catch {
-        patch = {};
+        lastPatch = await overrides.read();
+      } catch (error) {
+        if (lastPatch === null) throw error;
       }
 
-      return parseSettings({ ...cachedBase, ...pickOverrides(patch) });
+      return parseSettings({ ...cachedBase, ...pickOverrides(lastPatch) });
     },
   };
 }

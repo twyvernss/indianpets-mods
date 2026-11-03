@@ -7,7 +7,7 @@ import {
   toNonEmptyString,
 } from '../lib/sanitize.js';
 import { daysBetween, formatDisplayDate } from '../lib/time.js';
-import { isTransientError, withRetry } from '../lib/retry.js';
+import { isRefusedError, isTransientError, withRetry } from '../lib/retry.js';
 import {
   ANY_FLAIR,
   createSettingsReader,
@@ -105,6 +105,20 @@ describe('daysBetween', () => {
   });
 });
 
+describe('isRefusedError', () => {
+  it('allows a resend only when Reddit refused the request outright', () => {
+    expect(isRefusedError(new Error('HTTP 429 Too Many Requests'))).toBe(true);
+    expect(isRefusedError(new Error('503 Service Unavailable'))).toBe(true);
+  });
+
+  it('never resends after a timeout, which may already have posted', () => {
+    expect(isRefusedError(new Error('deadline exceeded'))).toBe(false);
+    expect(isRefusedError(new Error('request timed out'))).toBe(false);
+    expect(isRefusedError(new Error('504 Gateway Timeout'))).toBe(false);
+    expect(isRefusedError(new Error('socket hang up'))).toBe(false);
+  });
+});
+
 describe('isTransientError', () => {
   it('recognises rate limits and gateway failures', () => {
     expect(isTransientError(new Error('HTTP 429 Too Many Requests'))).toBe(true);
@@ -188,7 +202,9 @@ describe('settings', () => {
     expect(getAll).toHaveBeenCalledTimes(2);
   });
 
-  it('returns defaults rather than throwing when settings cannot be read', async () => {
+  it('refuses to invent defaults when settings have never been read', async () => {
+    // The defaults switch everything on; a community that turned something
+    // off must not have it come back during an outage.
     const reader = createSettingsReader(
       {
         getAll: async () => {
@@ -197,7 +213,27 @@ describe('settings', () => {
       },
       new FakeConfigRepo(),
     );
-    await expect(reader.get()).resolves.toEqual(parseSettings({}));
+    await expect(reader.get()).rejects.toThrow('settings unavailable');
+  });
+
+  it('keeps using the last settings it read when a later read fails', async () => {
+    let clock = 0;
+    let fail = false;
+    const reader = createSettingsReader(
+      {
+        getAll: async () => {
+          if (fail) throw new Error('settings unavailable');
+          return { altDetectionEnabled: false };
+        },
+      },
+      new FakeConfigRepo(),
+      () => clock,
+      1000,
+    );
+    expect((await reader.get()).altDetectionEnabled).toBe(false);
+    fail = true;
+    clock += 5000;
+    expect((await reader.get()).altDetectionEnabled).toBe(false);
   });
 });
 
@@ -323,7 +359,7 @@ describe('settings override layer', () => {
     expect(resolved.graceDays).toBe(CONFIG.reminders.minGraceDays);
   });
 
-  it('survives a corrupt override document', async () => {
+  it('does not run on defaults when the override store is down', async () => {
     const broken = {
       read: async (): Promise<Record<string, unknown>> => {
         throw new Error('redis down');
@@ -332,8 +368,9 @@ describe('settings override layer', () => {
       clear: async (): Promise<void> => {},
     };
 
-    const resolved = await createSettingsReader({ getAll: async () => ({}) }, broken).get();
-    expect(resolved).toEqual(parseSettings({}));
+    // A corrupt document is handled inside the repo; this is Redis itself
+    // failing, with no earlier read to fall back on, so nothing runs.
+    await expect(createSettingsReader({ getAll: async () => ({}) }, broken).get()).rejects.toThrow('redis down');
   });
 });
 

@@ -6,6 +6,7 @@ import type {
   AuthorSnapshot,
   CommentHandle,
   PostContent,
+  PostState,
   PostSnapshot,
   RedditPort,
   SchedulerPort,
@@ -101,17 +102,22 @@ export class FakeRedis implements RedisPort {
       .map(([member, score]) => ({ member, score }))
       .sort((a, b) => a.score - b.score || a.member.localeCompare(b.member));
 
+    // Mirrors real Redis and Devvit 0.14.5, so tests catch the two traps:
+    //  - a REVERSED score range is given as (highest, lowest); the natural
+    //    (lowest, highest) order matches nothing;
+    //  - a score or lex range with no `limit` returns at most 1,000 members.
     if (options?.by === 'score') {
-      const low = Number(start);
-      const high = Number(stop);
+      const low = Number(options.reverse ? stop : start);
+      const high = Number(options.reverse ? start : stop);
       entries = entries.filter((entry) => entry.score >= low && entry.score <= high);
     } else {
       entries = entries.slice(Number(start), Number(stop) + 1);
     }
 
     if (options?.reverse) entries.reverse();
-    if (options?.limit) {
-      entries = entries.slice(options.limit.offset, options.limit.offset + options.limit.count);
+    if (options?.by === 'score' || options?.by === 'lex') {
+      const limit = options.limit ?? { offset: 0, count: 1000 };
+      entries = entries.slice(limit.offset, limit.offset + limit.count);
     }
     return entries;
   }
@@ -180,6 +186,18 @@ export class FakeReddit implements RedditPort {
         flairText: null,
       }
     );
+  }
+
+  /** Set to force a state; otherwise it follows the `post` option. */
+  public postState: PostState | null = null;
+
+  async getPostState(postId: T3): Promise<PostState> {
+    this.calls.push('getPostState');
+    if (this.postState) return this.postState;
+    const post = await this.getPost(postId);
+    this.calls.pop(); // the nested getPost is an implementation detail
+    if (!post) return 'deleted';
+    return post.isRemoved ? 'removed' : 'up';
   }
 
   async approvePost(): Promise<void> {

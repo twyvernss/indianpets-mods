@@ -1,3 +1,4 @@
+import type { T3 } from '@devvit/web/shared';
 import type { TaskRequest, TaskResponse } from '@devvit/web/server';
 import { Hono } from 'hono';
 import { CONFIG, JOBS } from '../config.js';
@@ -7,7 +8,7 @@ import { formatShortDate } from '../lib/time.js';
 import { asPostId } from '../data/tokenRepo.js';
 import { isVerificationRecord } from '../data/verificationRepo.js';
 import { isPostContent } from '../services/altMatch.js';
-import { statusFromPost } from '../services/auditLog.js';
+import { statusFromState } from '../services/auditLog.js';
 import { isDuplicateFinding } from '../services/duplicates.js';
 
 export const jobs = new Hono();
@@ -181,12 +182,25 @@ jobs.post('/audit-log', async (c) => {
       return c.json<TaskResponse>({}, 200);
     }
 
-    await audit.record(raw);
+    const attempt = readNumber(request.data, 'attempt');
+    // A retry must not post to Mod Discussions a second time.
+    const onPage = await audit.record(raw, { quiet: attempt > 0 });
+
+    // Another write held the page (two verifications seconds apart, or a
+    // status update). Try again shortly rather than leaving the row to the
+    // next upgrade's backfill.
+    if (!onPage && attempt + 1 < 4) {
+      await scheduler.runJob({
+        name: JOBS.auditLog,
+        data: { record: { ...raw }, attempt: attempt + 1 },
+        runAt: new Date(Date.now() + 20_000 * (attempt + 1)),
+      });
+    }
 
     // The poster's history page shows who verified what, so it is refreshed
     // whenever one of their fundraisers is verified.
     const config = await settings.get();
-    if (raw.authorName && config.userHistoryEnabled) {
+    if (attempt === 0 && raw.authorName && config.userHistoryEnabled) {
       await scheduler.runJob({
         name: JOBS.userHistory,
         data: { username: raw.authorName },
@@ -297,32 +311,67 @@ jobs.post('/audit-backfill', async (c) => {
     const offset = readNumber(request.data, 'offset');
     const batchIndex = readNumber(request.data, 'batchIndex');
 
-    const postIds = await repo.allVerified(offset, CONFIG.audit.backfillBatchSize);
+    // Look through a wide window with one Redis read, and spend Reddit calls
+    // only on verifications not yet fully logged. On an upgrade where all of
+    // them already are, the whole history is skimmed in a handful of runs.
+    const postIds = await repo.allVerified(offset, CONFIG.audit.backfillScanSize);
     if (postIds.length === 0) {
       log.info('wiki log backfill complete', { offset });
       return c.json<TaskResponse>({}, 200);
     }
 
-    const records = await repo.getMany(postIds);
     const config = await settings.get();
-    const authors = new Set<string>();
+    if (!config.enabled || !config.wikiLogEnabled) {
+      log.info('wiki log backfill skipped: the wiki log is switched off');
+      return c.json<TaskResponse>({}, 200);
+    }
 
-    for (const record of records) {
+    const done = await audit.loggedAmong(postIds);
+
+    // Choose this run's work up front, so the next run can be queued BEFORE
+    // any slow Reddit call. If this request is cut off at the 30s limit, the
+    // backfill still carries on rather than stopping silently.
+    const todo: T3[] = [];
+    let examined = 0;
+    for (const postId of postIds) {
+      if (todo.length >= CONFIG.audit.backfillBatchSize) break;
+      examined += 1;
+      if (!done.has(postId)) todo.push(postId);
+    }
+
+    const more = examined < postIds.length || postIds.length === CONFIG.audit.backfillScanSize;
+    if (more && batchIndex + 1 < CONFIG.audit.maxBackfillBatches) {
+      await scheduler.runJob({
+        name: JOBS.auditBackfill,
+        data: { offset: offset + examined, batchIndex: batchIndex + 1 },
+        runAt: new Date(Date.now() + 10_000),
+      });
+    }
+
+    const authors = new Set<string>();
+    for (const record of await repo.getMany(todo)) {
       if (record.status !== 'complete') continue;
-      await audit.record(record, { backfill: true });
+
+      // Only a row that actually reached the wiki is marked; one that could
+      // not be written (busy page, privacy check failed) is tried next time.
+      if (!(await audit.record(record, { backfill: true }))) continue;
 
       // Rows written before the Status column existed get today's state once.
-      // A status an event already wrote is never overwritten.
-      const post = await reddit.getPost(record.postId);
-      await audit.setStatus({
-        postId: record.postId,
-        verifiedAtMs: record.verifiedAtMs,
-        status: statusFromPost(post),
-        onlyIfMissing: true,
-      });
+      // A status an event already wrote is never overwritten. Left unmarked
+      // when Reddit cannot be asked, so a later run fills it in rather than
+      // writing a guess.
+      const status = statusFromState(await reddit.getPostState(record.postId));
+      const statusWritten =
+        status !== null &&
+        (await audit.setStatus({
+          postId: record.postId,
+          verifiedAtMs: record.verifiedAtMs,
+          status,
+          onlyIfMissing: true,
+        }));
+      if (statusWritten) await audit.markLogged(record.postId);
 
-      const author = post?.authorName ?? record.authorName;
-      if (author) authors.add(author);
+      if (record.authorName) authors.add(record.authorName);
     }
 
     // Every past poster gets a history page, so the index lists everyone and
@@ -336,18 +385,9 @@ jobs.post('/audit-backfill', async (c) => {
         });
       }
     }
-    log.info('wiki log backfill batch done', { offset, examined: records.length, authors: authors.size });
 
-    if (
-      postIds.length === CONFIG.audit.backfillBatchSize &&
-      batchIndex + 1 < CONFIG.audit.maxBackfillBatches
-    ) {
-      await scheduler.runJob({
-        name: JOBS.auditBackfill,
-        data: { offset: offset + postIds.length, batchIndex: batchIndex + 1 },
-        runAt: new Date(Date.now() + 5_000),
-      });
-    }
+    log.info('wiki log backfill batch done', { offset, examined, processed: todo.length, authors: authors.size });
+    if (!more) log.info('wiki log backfill complete', { offset: offset + examined });
   } catch (error) {
     log.error('wiki log backfill failed', { reason: describeError(error) });
   }

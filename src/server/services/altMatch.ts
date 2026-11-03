@@ -21,10 +21,17 @@ export type AccountMatch = {
   author: string;
   /** Higher is a stronger match. Only meaningful for ordering. */
   score: number;
-  /** Distinct identifiers shared, by kind. */
+  /** Distinct identifiers shared, by kind. Excludes the common ones below. */
   shared: Partial<Record<IdentifierKind, number>>;
+  /**
+   * Identifiers shared that several other accounts ALSO use - a clinic's phone
+   * number, a shelter's UPI ID. Listed, but not evidence of one person.
+   */
+  commonShared: number;
   /** Highest wording overlap between any two of the posts, 0 to 1. */
   textSimilarity: number;
+  /** True when that wording is shared with several accounts, like a post template. */
+  wordingIsCommon: boolean;
   /** Their posts that matched, newest first. */
   postIds: T3[];
   /** Filled in for the top matches only; a ban lookup is a Reddit call. */
@@ -37,13 +44,37 @@ export function sharesPaymentDetails(match: AccountMatch): boolean {
 }
 
 /**
+ * Whether a match is strong enough to put the post in the modqueue.
+ *
+ * A banned account is always worth a look: that is ban evasion, whatever is
+ * shared. Otherwise only DISTINCTIVE evidence counts - payment details few
+ * accounts use, or wording that is not a template. Shared links alone are
+ * the duplicate detector's job.
+ */
+export function isReportWorthy(match: AccountMatch, minSimilarity: number): boolean {
+  if (match.banned) return true;
+  if (sharesPaymentDetails(match)) return true;
+  return match.textSimilarity >= minSimilarity && !match.wordingIsCommon;
+}
+
+/**
+ * How many OTHER accounts must share an identifier, or a wording, before it is
+ * treated as common rather than as a sign of one person. Two honest posters at
+ * the same vet clinic share its phone number; three or more accounts sharing
+ * something is a clinic, a shelter or a post template far more often than one
+ * person with three accounts - and a banned account is still reported anyway.
+ */
+export const COMMON_ACCOUNTS = 3;
+
+/**
  * Ranks every other account against one person's posts.
  *
  * Pure, so the scoring can be tested without Redis. An account qualifies with
  * any shared identifier, or with wording at or above `minSimilarity`. Score is
  * the weighted count of distinct shared identifiers plus up to six points for
  * wording, so one shared UPI ID (3) outranks a single shared link (2), and
- * shared payment details plus a copied story outranks either alone.
+ * shared payment details plus a copied story outranks either alone. Common
+ * identifiers count one point each and common wording barely at all.
  */
 export function rankMatches(
   own: readonly StoredFingerprint[],
@@ -57,9 +88,14 @@ export function rankMatches(
 
   type Tally = { author: string; ids: Set<string>; similarity: number; posts: StoredFingerprint[] };
   const byAuthor = new Map<string, Tally>();
+  /** Which other accounts use each shared identifier. */
+  const idAccounts = new Map<string, Set<string>>();
+  /** Other accounts whose wording clears the threshold. */
+  const wordingAccounts = new Set<string>();
 
   for (const candidate of candidates) {
     if (!candidate.author || candidate.author.toLowerCase() === self) continue;
+    const key = candidate.author.toLowerCase();
 
     const sharedIds = candidate.ids.filter((id) => ownIds.has(id));
     let similarity = 0;
@@ -68,7 +104,13 @@ export function rankMatches(
     }
     if (sharedIds.length === 0 && similarity < minSimilarity) continue;
 
-    const key = candidate.author.toLowerCase();
+    for (const id of sharedIds) {
+      const accounts = idAccounts.get(id) ?? new Set<string>();
+      accounts.add(key);
+      idAccounts.set(id, accounts);
+    }
+    if (similarity >= minSimilarity) wordingAccounts.add(key);
+
     const tally = byAuthor.get(key) ?? { author: candidate.author, ids: new Set(), similarity: 0, posts: [] };
     for (const id of sharedIds) tally.ids.add(id);
     tally.similarity = Math.max(tally.similarity, similarity);
@@ -76,26 +118,39 @@ export function rankMatches(
     byAuthor.set(key, tally);
   }
 
+  const wordingIsCommon = wordingAccounts.size >= COMMON_ACCOUNTS;
+
   const matches: AccountMatch[] = [];
   for (const tally of byAuthor.values()) {
     const shared: Partial<Record<IdentifierKind, number>> = {};
+    let commonShared = 0;
     let score = 0;
     for (const id of tally.ids) {
       const kind = identifierKind(id);
       if (!kind) continue;
+      if ((idAccounts.get(id)?.size ?? 0) >= COMMON_ACCOUNTS) {
+        commonShared += 1;
+        score += 1;
+        continue;
+      }
       shared[kind] = (shared[kind] ?? 0) + 1;
       score += IDENTIFIER_WEIGHT[kind];
     }
-    // Wording below the threshold still helps ORDER accounts that share an
-    // identifier, but it never qualifies an account on its own.
-    if (tally.similarity >= minSimilarity) score += Math.round(tally.similarity * 6);
-    else score += tally.similarity;
+    // Wording below the threshold, or wording many accounts share, still
+    // helps ORDER accounts, but never qualifies one on its own.
+    if (tally.similarity >= minSimilarity && !wordingIsCommon) {
+      score += Math.round(tally.similarity * 6);
+    } else {
+      score += tally.similarity;
+    }
 
     matches.push({
       author: tally.author,
       score,
       shared,
+      commonShared,
       textSimilarity: tally.similarity,
+      wordingIsCommon: wordingIsCommon && tally.similarity >= minSimilarity,
       postIds: tally.posts
         .sort((a, b) => b.postedAtMs - a.postedAtMs)
         .slice(0, 5)
@@ -185,6 +240,10 @@ export function createAltService(deps: AltDeps): AltService {
 
       const postIds = await fingerprints.byAuthor(username, CONFIG.history.postsToMatch);
       const own = await fingerprints.getMany(postIds);
+      // Logged because an empty answer here is otherwise indistinguishable
+      // from "this person matches nobody" - which is how a broken newest-first
+      // read once went unnoticed.
+      log.info('matching a poster', { ownPosts: own.length });
       if (own.length === 0) return [];
       return match(own, username);
     },
@@ -201,32 +260,35 @@ export function createAltService(deps: AltDeps): AltService {
       const top = matches[0];
       if (!top) return { kind: 'no-match' };
 
-      // Shared links alone are the duplicate detector's job; reporting them
-      // here as well would put the same post in the queue twice. A banned
-      // match is always worth a report: that is ban evasion, not a repost.
-      const strong = top.banned || sharesPaymentDetails(top) || top.textSimilarity >= config.altSimilarityPercent / 100;
+      // The strongest match is not always the one worth reporting: a banned
+      // account ranked second matters more than a shared link ranked first.
+      // Shared links alone are left to the duplicate detector, so the same
+      // post is not queued twice; a banned match is reported regardless.
+      const worth = matches.find((entry) => isReportWorthy(entry, config.altSimilarityPercent / 100));
       let reported = false;
 
-      if (strong && !(await fingerprints.wasReported(post.id))) {
+      if (worth && !(await fingerprints.wasReported(post.id))) {
         const duplicateAlready = await links.wasReported(post.id);
         let flairOk = true;
-        if (config.fundraiserFlairText.length > 0 && !top.banned) {
+        if (config.fundraiserFlairText.length > 0 && !worth.banned) {
           const snapshot = await reddit.getPost(post.id);
           flairOk = snapshot !== null && matchesFundraiserFlair(snapshot.flairText, config.fundraiserFlairText);
         }
 
-        if (flairOk && (!duplicateAlready || top.banned)) {
+        if (flairOk && (!duplicateAlready || worth.banned)) {
           await fingerprints.markReported(post.id, now());
-          await reddit.reportPost(post.id, buildAltReportReason(top));
+          await reddit.reportPost(post.id, buildAltReportReason(worth));
           reported = true;
         }
       }
 
       scoped.info('alt check done', {
-        matched: top.author,
-        score: top.score,
-        banned: top.banned,
-        textSimilarity: Math.round(top.textSimilarity * 100),
+        matched: (worth ?? top).author,
+        score: (worth ?? top).score,
+        banned: (worth ?? top).banned,
+        textSimilarity: Math.round((worth ?? top).textSimilarity * 100),
+        commonShared: top.commonShared,
+        wordingIsCommon: top.wordingIsCommon,
         reported,
       });
 
@@ -242,7 +304,7 @@ export function createAltService(deps: AltDeps): AltService {
         }
       }
 
-      return { kind: 'matched', top, reported };
+      return { kind: 'matched', top: worth ?? top, reported };
     },
 
     async backfill(after): Promise<{ indexed: number; last: T3 | null }> {

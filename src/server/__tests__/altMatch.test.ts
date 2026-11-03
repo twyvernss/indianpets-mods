@@ -5,6 +5,7 @@ import { createFingerprintRepo } from '../data/fingerprintRepo.js';
 import type { StoredFingerprint } from '../data/fingerprintRepo.js';
 import { keys } from '../data/keys.js';
 import { createLinkRepo } from '../data/linkRepo.js';
+import { allByScore, newestByScore } from '../data/redisPort.js';
 import {
   extractPaymentIdentifiers,
   fingerprintPost,
@@ -190,6 +191,60 @@ describe('alt check', () => {
     expect(h.reddit.reports).toHaveLength(0);
   });
 
+  it('does not report honest posters who share a clinic phone number many accounts use', async () => {
+    const h = harness();
+    const clinic = 'Treatment at Pet Care Clinic, call 9876543210 for the bill.';
+    await h.service.index(post('t3_a', 'owner_a', `${clinic} Our cat Mau.`));
+    await h.service.index(post('t3_b', 'owner_b', `${clinic} Our dog Tiger.`));
+    await h.service.index(post('t3_c', 'owner_c', `${clinic} Our dog Kalu.`));
+
+    await h.service.check(post('t3_new', 'owner_d', `${clinic} Our kitten Bunny.`));
+    expect(h.reddit.reports).toHaveLength(0);
+  });
+
+  it('still reports a shared common detail when the matched account is banned', async () => {
+    const h = harness();
+    const clinic = 'call 9876543210';
+    for (const name of ['owner_a', 'owner_b', 'banned_one']) {
+      await h.service.index(post(`t3_${name}`, name, clinic));
+    }
+    h.reddit.banned.add('banned_one');
+
+    await h.service.check(post('t3_new', 'fresh', clinic));
+    expect(h.reddit.reports[0]?.reason).toContain('u/banned_one (BANNED here)');
+  });
+
+  it('still reports a distinctive UPI ID alongside a common clinic number', async () => {
+    const h = harness();
+    const clinic = 'call 9876543210';
+    await h.service.index(post('t3_a', 'owner_a', clinic));
+    await h.service.index(post('t3_b', 'owner_b', clinic));
+    await h.service.index(post('t3_c', 'owner_c', `${clinic} UPI bruno.help@okaxis`));
+
+    await h.service.check(post('t3_new', 'fresh', `${clinic} UPI bruno.help@okaxis`));
+    expect(h.reddit.reports[0]?.reason).toContain('Possible alt of u/owner_c');
+  });
+
+  it('does not treat a post template many accounts follow as copied wording', async () => {
+    const h = harness();
+    const template = (pet: string) =>
+      `Pet name: ${pet}. Species and age: please fill in. Vet clinic and city: please fill in. ` +
+      'Total bill amount and what it covers: please fill in. Amount already raised so far: please fill in. ' +
+      'How to donate and who receives the money: please fill in. Updates will be posted in the comments below.';
+    for (const [id, name] of [['t3_a', 'owner_a'], ['t3_b', 'owner_b'], ['t3_c', 'owner_c']] as const) {
+      await h.service.index(post(id, name, template(name)));
+    }
+
+    await h.service.check(post('t3_new', 'owner_d', template('Bunny')));
+    expect(h.reddit.reports).toHaveLength(0);
+
+    // Control: the same wording against ONE other account is a copied story.
+    const single = harness();
+    await single.service.index(post('t3_a', 'owner_a', template('owner_a')));
+    await single.service.check(post('t3_new', 'owner_d', template('Bunny')));
+    expect(single.reddit.reports[0]?.reason).toContain('% same wording');
+  });
+
   it('does not report the same post twice', async () => {
     const h = harness();
     await h.service.index(post('t3_old', 'first', `${STORY} 9876543210`));
@@ -237,6 +292,25 @@ describe('alt check', () => {
     const h = harness({ altDetectionEnabled: false });
     await expect(h.service.check(post('t3_new', 'second', STORY))).resolves.toEqual({ kind: 'off' });
     expect(await h.fingerprints.get('t3_new' as T3)).toBeNull();
+  });
+});
+
+describe('newest-first reads', () => {
+  it('returns the newest members, where the natural range order returns nothing', async () => {
+    const redis = new FakeRedis();
+    await redis.zAdd('k', { member: 'old', score: 1 }, { member: 'mid', score: 2 }, { member: 'new', score: 3 });
+
+    expect((await newestByScore(redis, 'k', 2)).map((entry) => entry.member)).toEqual(['new', 'mid']);
+    // The bug this guards against: real Redis reads a reversed range as (max, min).
+    expect(
+      await redis.zRange('k', 0, Number.MAX_SAFE_INTEGER, { by: 'score', reverse: true, limit: { offset: 0, count: 2 } }),
+    ).toEqual([]);
+  });
+
+  it('reads past the 1,000-member default page', async () => {
+    const redis = new FakeRedis();
+    for (let index = 0; index < 2500; index++) await redis.zAdd('k', { member: `m${index}`, score: 0 });
+    expect(await allByScore(redis, 'k')).toHaveLength(2500);
   });
 });
 

@@ -213,8 +213,9 @@ triggers.post('/comment-create', async (c) => {
  * that a post which is removed and later restored still reads as "already
  * verified" and cannot be given a second verification comment.
  *
- * Link ownership IS released, so a genuinely deleted fundraiser does not leave
- * its URLs permanently claimed.
+ * Link ownership is released only on an AUTHOR deletion, so a fundraiser its
+ * owner took down does not leave its URLs claimed forever, while one a
+ * moderator removed keeps them - a repost of a removed scam is still reported.
  */
 triggers.post('/post-delete', async (c) => {
   const { log, repo, duplicates, alt } = getContainer();
@@ -229,7 +230,10 @@ triggers.post('/post-delete', async (c) => {
       const byAuthor = deletedByAuthor((body as { source?: unknown }).source);
       await Promise.all([
         repo.markDeleted(postId, parseIsoMs(body.deletedAt, Date.now())),
-        duplicates.forgetPost(postId),
+        // Links and fingerprints are released only when the AUTHOR deletes.
+        // A post a moderator removed - often a scam - must keep its links
+        // claimed, or the next account to post them would not be reported.
+        byAuthor ? duplicates.forgetPost(postId) : Promise.resolve(),
         byAuthor ? alt.forgetPost(postId) : Promise.resolve(),
         queueStatus(postId, byAuthor ? 'deleted by author' : 'removed'),
       ]);

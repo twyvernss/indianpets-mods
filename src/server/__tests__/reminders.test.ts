@@ -121,6 +121,51 @@ describe('sweep - reminding', () => {
     expect(h.reddit.reports).toHaveLength(0);
   });
 
+  it('drops a post that is still removed long after it was verified', async () => {
+    const h = harness({}, { post: REMOVED });
+    await h.seed({ postId: 't3_ancient', verifiedAtMs: NOW - 90 * DAY });
+
+    const result = await h.service.sweep({ offset: 0, batchIndex: 0 });
+    expect(result.closed).toBe(1);
+    expect(h.redis.sizeOf(keys.openIndex())).toBe(0);
+  });
+
+  it('starts the next page where the shrunken queue now begins, so nothing is skipped', async () => {
+    const h = harness();
+    for (let index = 0; index < CONFIG.reminders.batchSize + 5; index++) {
+      await h.seed({ postId: `t3_p${index}`, reminderSentAtMs: NOW - 30 * DAY });
+    }
+
+    const result = await h.service.sweep({ offset: 0, batchIndex: 0 });
+    expect(result.escalated).toBe(CONFIG.reminders.batchSize);
+    // All ten left the open index, so the remaining five now start at 0.
+    expect(h.scheduler.jobsNamed(JOBS.staleSweepBatch)[0]?.data).toMatchObject({ offset: 0 });
+  });
+
+  it('changes nothing when Reddit cannot be reached, so the next sweep tries again', async () => {
+    const h = harness();
+    h.reddit.postState = 'unknown';
+    await h.seed({ postId: 't3_old' });
+
+    const result = await h.service.sweep({ offset: 0, batchIndex: 0 });
+    expect(result).toMatchObject({ reminded: 0, closed: 0 });
+    const record = await h.repo.get('t3_old' as T3);
+    expect(record?.deletedAtMs).toBeNull();
+    expect(record?.authorName).toBe('op_user');
+    expect(h.reddit.comments).toHaveLength(0);
+  });
+
+  it('stops chasing a post its author deleted, without commenting on it', async () => {
+    const h = harness();
+    h.reddit.postState = 'deleted';
+    await h.seed({ postId: 't3_old' });
+
+    const result = await h.service.sweep({ offset: 0, batchIndex: 0 });
+    expect(result.closed).toBe(1);
+    expect(h.reddit.comments).toHaveLength(0);
+    expect((await h.repo.get('t3_old' as T3))?.deletedAtMs).not.toBeNull();
+  });
+
   it('refuses a by-hand follow-up on a removed post', async () => {
     const h = harness({}, { post: REMOVED });
     await h.seed({ postId: 't3_old' });

@@ -72,9 +72,14 @@ export const CONFIG = {
      * calls (row, then status: privacy check, read, write, post lookup), so
      * this stays small to keep a run well inside the 30s request limit.
      */
-    backfillBatchSize: 3,
-    /** Ceiling on chained runs: 400 x 3 = 1,200 verifications. */
-    maxBackfillBatches: 400,
+    backfillBatchSize: 2,
+    /**
+     * Verifications looked at per run (one Redis read). Ones already logged
+     * cost nothing more, so a later upgrade skims the history quickly.
+     */
+    backfillScanSize: 100,
+    /** Ceiling on chained runs: at least 500 x 2 = 1,000 verifications written. */
+    maxBackfillBatches: 500,
   },
 
   /** Guard rails on moderator-written notice templates. */
@@ -182,6 +187,8 @@ export const CONFIG = {
     maxReminderDays: 365,
     minGraceDays: 1,
     maxGraceDays: 90,
+    /** A verified post still removed this long after verifying leaves the chase. */
+    dropRemovedAfterDays: 60,
   },
 
   /** IST. r/IndianPets is an India-focused community; dates are shown in local time. */

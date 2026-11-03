@@ -154,7 +154,13 @@ export function createReminderService(deps: ReminderDeps): ReminderService {
         try {
           await scheduler.runJob({
             name: JOBS.staleSweepBatch,
-            data: { offset: offset + candidates.length, batchIndex: batchIndex + 1 },
+            // Escalated and closed posts have just left the open index, so the
+            // posts after this page have shifted up by that many. Advancing by
+            // the full page would skip them until tomorrow.
+            data: {
+              offset: offset + candidates.length - result.escalated - result.closed,
+              batchIndex: batchIndex + 1,
+            },
             runAt: new Date(timestamp + CONFIG.reminders.chainDelaySeconds * 1000),
           });
           result.chained = true;
@@ -253,6 +259,9 @@ export function createReminderService(deps: ReminderDeps): ReminderService {
         const state = await postState(record, timestamp);
         if (state === 'missing') return { kind: 'post-missing' };
         if (state === 'removed') return { kind: 'removed' };
+        if (state === 'unknown') {
+          return { kind: 'failed', detail: 'Reddit could not be reached just now. Nothing was sent; try again in a minute.' };
+        }
 
         if (chosen === 'remind') {
           // Idempotent: never a second reminder on the same post.
@@ -307,13 +316,13 @@ export function createReminderService(deps: ReminderDeps): ReminderService {
   async function postState(
     record: VerificationRecord,
     timestamp: number,
-  ): Promise<'up' | 'removed' | 'missing'> {
-    const post = await reddit.getPost(record.postId);
-    if (!post) {
+  ): Promise<'up' | 'removed' | 'missing' | 'unknown'> {
+    const state = await reddit.getPostState(record.postId);
+    if (state === 'deleted') {
       await repo.markDeleted(record.postId, timestamp);
       return 'missing';
     }
-    return post.isRemoved ? 'removed' : 'up';
+    return state;
   }
 
   /** Callers check {@link postState} first; this never comments on a removed post. */
@@ -424,14 +433,48 @@ export function createReminderService(deps: ReminderDeps): ReminderService {
       return 'waiting';
     }
 
+    // The same lock the verify flow and the by-hand follow-up take, so an
+    // overlapping run (the button pressed during the 3 AM chain, a redelivered
+    // job) can never post a second reminder.
+    const owner = `sweep-${timestamp}-${Math.random()}`;
+    if (!(await repo.acquireLock(record.postId, owner, timestamp))) return 'waiting';
+    try {
+      return await act(record, timestamp, config);
+    } finally {
+      await repo.releaseLock(record.postId, owner);
+    }
+  }
+
+  /** The part of {@link handleOne} that runs under the post lock. */
+  async function act(
+    current: VerificationRecord,
+    timestamp: number,
+    config: AppSettings,
+  ): Promise<'reminded' | 'escalated' | 'closed' | 'removed' | 'waiting'> {
+    // Re-read under the lock: another run may have just acted on it.
+    const record = (await repo.get(current.postId)) ?? current;
+    if (record.escalatedAtMs !== null) return 'waiting';
+
     const state = await postState(record, timestamp);
     if (state === 'missing') return 'closed';
-    if (state === 'removed') return 'removed';
+    if (state === 'removed') {
+      // A post still removed long after verification is not coming back.
+      // Dropping it keeps removed posts from piling up at the front of the
+      // queue and costing a lookup every night.
+      if (timestamp - record.verifiedAtMs > CONFIG.reminders.dropRemovedAfterDays * 86_400_000) {
+        await repo.closeOpen(record.postId);
+        return 'closed';
+      }
+      return 'removed';
+    }
+    // Reddit did not answer: leave it exactly as it is for the next sweep.
+    if (state === 'unknown') return 'waiting';
 
     if (record.reminderSentAtMs === null) {
       await sendReminder(record, timestamp);
       return 'reminded';
     }
+    if (timestamp - record.reminderSentAtMs < config.graceDays * 86_400_000) return 'waiting';
 
     await escalate(record, timestamp, config.lockStalePosts);
     return 'escalated';

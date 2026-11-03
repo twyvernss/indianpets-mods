@@ -5,7 +5,7 @@ import { DEFAULT_CHECKLIST_LABELS } from '../text.js';
 import type { ChecklistItemResult, VerificationRecord } from '../types.js';
 import { keys } from './keys.js';
 import type { RedisPort } from './redisPort.js';
-import { parseJson } from './redisPort.js';
+import { newestByScore, parseJson } from './redisPort.js';
 
 export type VerificationRepo = {
   get(postId: T3): Promise<VerificationRecord | null>;
@@ -286,11 +286,7 @@ export function createVerificationRepo(redis: RedisPort): VerificationRepo {
     },
 
     async getAuthorHistory(username, limit) {
-      const entries = await redis.zRange(keys.authorHistory(username), 0, Number.MAX_SAFE_INTEGER, {
-        by: 'score',
-        reverse: true,
-        limit: { offset: 0, count: limit },
-      });
+      const entries = await newestByScore(redis, keys.authorHistory(username), limit);
       return entries.map((entry) => ({
         postId: entry.member as T3,
         verifiedAtMs: entry.score,

@@ -4,12 +4,13 @@ import type { T1, T3 } from '@devvit/web/shared';
 import { CONFIG } from '../config.js';
 import type { Logger } from '../lib/logger.js';
 import { describeError } from '../lib/logger.js';
-import { withRetry } from '../lib/retry.js';
+import { defaultRetryEnvironment, isRefusedError, withRetry } from '../lib/retry.js';
 import { judgeWikiPrivacy, WIKI_PERM_MODS_ONLY } from '../lib/wikiPrivacy.js';
 import type {
   AuthorSnapshot,
   CommentHandle,
   PostContent,
+  PostState,
   PostSnapshot,
   RedditPort,
   SchedulerPort,
@@ -57,6 +58,9 @@ const WIKI_MODS_ONLY = WIKI_PERM_MODS_ONLY as WikiPagePermissionLevel;
 export function createRedditAdapter(log: Logger): RedditPort {
   const run = <T>(label: string, operation: () => Promise<T>): Promise<T> =>
     withRetry(operation, CONFIG.retry, log, label);
+  /** For writes that would duplicate if repeated: retried only when refused. */
+  const runOnce = <T>(label: string, operation: () => Promise<T>): Promise<T> =>
+    withRetry(operation, CONFIG.retry, log, label, defaultRetryEnvironment, isRefusedError);
 
   return {
     subredditName(): string {
@@ -99,6 +103,21 @@ export function createRedditAdapter(log: Logger): RedditPort {
       }
     },
 
+    async getPostState(postId: T3): Promise<PostState> {
+      try {
+        const post = await run('getPostById(state)', () => reddit.getPostById(postId));
+        // An author deletion leaves the post in place with its author shown
+        // as "[deleted]"; Reddit labels it in removedByCategory as well.
+        if (post.authorName === '[deleted]' || post.removedByCategory === 'deleted') return 'deleted';
+        if (post.isRemoved() || post.isSpam()) return 'removed';
+        return 'up';
+      } catch (error) {
+        // An outage or a rate limit is NOT a deleted post.
+        log.warn('post state could not be read', { postId, reason: describeError(error) });
+        return 'unknown';
+      }
+    },
+
     async approvePost(postId: T3): Promise<void> {
       await run('approve', () => reddit.approve(postId));
     },
@@ -106,7 +125,7 @@ export function createRedditAdapter(log: Logger): RedditPort {
     async submitAppComment(postId: T3, text: string): Promise<CommentHandle> {
       // `runAs: 'APP'` posts as the app account (u/indianpets-mods), which is
       // the entire point: no moderator's personal account is attached to this.
-      const comment = await run('submitComment', () =>
+      const comment = await runOnce('submitComment', () =>
         reddit.submitComment({ id: postId, text, runAs: 'APP' }),
       );
 
@@ -125,7 +144,7 @@ export function createRedditAdapter(log: Logger): RedditPort {
       // round trips. It only ever runs on the rare duplicate/stale paths, never
       // on a hot trigger path.
       const post = await run('getPostById(report)', () => reddit.getPostById(postId));
-      await run('report', () => reddit.report(post, { reason }));
+      await runOnce('report', () => reddit.report(post, { reason }));
     },
 
     async lockPost(postId: T3): Promise<void> {
@@ -220,7 +239,7 @@ export function createRedditAdapter(log: Logger): RedditPort {
     },
 
     async sendModDiscussion(subject: string, bodyMarkdown: string): Promise<void> {
-      await run('modDiscussion', () =>
+      await runOnce('modDiscussion', () =>
         reddit.modMail.createModDiscussionConversation({
           subject,
           bodyMarkdown,

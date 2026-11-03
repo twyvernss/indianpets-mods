@@ -3,7 +3,7 @@ import { CONFIG } from '../config.js';
 import { signatureBands } from '../lib/fingerprint.js';
 import { keys } from './keys.js';
 import type { RedisPort } from './redisPort.js';
-import { parseJson } from './redisPort.js';
+import { newestByScore, parseJson } from './redisPort.js';
 
 /** One post's fingerprint as stored. Holds no post text. */
 export type StoredFingerprint = {
@@ -70,14 +70,8 @@ function indexKeys(fingerprint: StoredFingerprint): string[] {
 }
 
 export function createFingerprintRepo(redis: RedisPort): FingerprintRepo {
-  const newest = async (key: string, limit: number): Promise<string[]> => {
-    const entries = await redis.zRange(key, 0, Number.MAX_SAFE_INTEGER, {
-      by: 'score',
-      reverse: true,
-      limit: { offset: 0, count: limit },
-    });
-    return entries.map((entry) => entry.member);
-  };
+  const newest = async (key: string, limit: number): Promise<string[]> =>
+    (await newestByScore(redis, key, limit)).map((entry) => entry.member);
 
   return {
     async save(fingerprint, nowMs) {
