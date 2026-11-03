@@ -16,6 +16,8 @@ import type { AuditLogService } from './services/auditLog.js';
 import { createAuditLogService } from './services/auditLog.js';
 import type { DuplicateService } from './services/duplicates.js';
 import { createDuplicateService } from './services/duplicates.js';
+import type { FundraiserLimitService } from './services/fundraiserLimit.js';
+import { createFundraiserLimitService } from './services/fundraiserLimit.js';
 import type { FlairCheckService } from './services/flairCheck.js';
 import { createFlairCheckService } from './services/flairCheck.js';
 import type { IntakeService } from './services/intake.js';
@@ -61,6 +63,7 @@ export type Container = {
   alt: AltService;
   history: UserHistoryService;
   flairCheck: FlairCheckService;
+  fundraiserLimit: FundraiserLimitService;
 };
 
 let instance: Container | null = null;
@@ -159,6 +162,7 @@ export function getContainer(): Container {
     alt,
     history,
     flairCheck: createFlairCheckService({ reddit, redis: redisPort, settings, log, now }),
+    fundraiserLimit: createFundraiserLimitService({ reddit, redis: redisPort, links, settings, log, now }),
   };
   return instance;
 }

@@ -142,6 +142,7 @@ triggers.post('/post-submit', async (c) => {
       // spotting a fundraiser posted under another flair.
       const wanted =
         config.altDetectionEnabled ||
+        config.fundraiserLimitHours > 0 ||
         (config.reportMisflairedFundraisers && config.fundraiserFlairText.length > 0);
       if (config.enabled && wanted && author) {
         const nowMs = Date.now();
@@ -155,6 +156,7 @@ triggers.post('/post-submit', async (c) => {
               body: text.slice(0, CONFIG.alt.maxBodyChars),
               url,
               createdAtMs: parseCreatedMs(body.post?.createdAt, nowMs),
+              flairText: body.post?.linkFlair?.text ?? null,
             },
           },
           runAt: new Date(nowMs + CONFIG.alt.checkDelaySeconds * 1000),

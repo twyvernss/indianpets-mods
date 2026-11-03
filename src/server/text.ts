@@ -303,6 +303,22 @@ export function describeMatch(match: MatchSummary): string {
   return parts.join('; ');
 }
 
+/** Modqueue reason for a second fundraiser from one person inside the window. */
+export function buildFundraiserLimitReason(input: {
+  count: number;
+  windowHours: number;
+  author: string;
+  lastPostId: string;
+  hoursAgo: number;
+}): string {
+  const nth = input.count === 2 ? '2nd' : input.count === 3 ? '3rd' : `${input.count}th`;
+  const ago = input.hoursAgo < 1 ? 'under 1h ago' : `${input.hoursAgo}h ago`;
+  return truncate(
+    `${nth} fundraiser in ${input.windowHours}h from u/${input.author}: last one ${input.lastPostId} ${ago}`,
+    CONFIG.reportReasonMaxLength,
+  );
+}
+
 /** Modqueue reason for a fundraiser posted under another flair. */
 export function buildMisflairReason(flairText: string | null, reasons: readonly string[]): string {
   const flair = flairText && flairText.trim().length > 0 ? `"${flairText.trim()}"` : 'no flair';

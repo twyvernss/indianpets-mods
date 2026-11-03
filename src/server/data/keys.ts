@@ -73,6 +73,12 @@ import { KEY_PREFIX } from '../config.js';
  *   fv:alt:{postId}      STRING  "1", TTL 30d. Stops a post being reported as a
  *                                possible alt twice.
  *
+ * FUNDRAISER FREQUENCY
+ *   fv:frp:{username}    ZSET    member = postId, score = postedAtMs. Every post
+ *                                by this person that was a fundraiser - by flair
+ *                                or by its content - for the one-per-window rule.
+ *   fv:frlim:{postId}    STRING  Report claim, TTL 30d. One report per post.
+ *
  * Everything is namespaced under `fv:` so a future feature can add keys
  * without colliding, and so a bulk cleanup can be reasoned about.
  * ============================================================================
@@ -97,4 +103,6 @@ export const keys = {
   fingerprintBand: (bandKey: string): string => `${KEY_PREFIX}:fp:b:${bandKey}`,
   fingerprintAuthor: (username: string): string => `${KEY_PREFIX}:fp:a:${username.toLowerCase()}`,
   altReported: (postId: T3): string => `${KEY_PREFIX}:alt:${postId}`,
+  fundraiserPosts: (username: string): string => `${KEY_PREFIX}:frp:${username.toLowerCase()}`,
+  fundraiserLimitReported: (postId: T3): string => `${KEY_PREFIX}:frlim:${postId}`,
 } as const;

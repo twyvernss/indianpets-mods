@@ -221,7 +221,7 @@ jobs.post('/audit-log', async (c) => {
  * re-validated here because it travelled through the scheduler as JSON.
  */
 jobs.post('/alt-check', async (c) => {
-  const { log, alt, flairCheck } = getContainer();
+  const { log, alt, flairCheck, fundraiserLimit } = getContainer();
 
   try {
     const request = await c.req.json<TaskRequest>();
@@ -233,8 +233,12 @@ jobs.post('/alt-check', async (c) => {
     }
 
     // Independent: a failure in one must not skip the other.
-    const [altResult, flairResult] = await Promise.allSettled([alt.check(post), flairCheck.check(post)]);
-    for (const result of [altResult, flairResult]) {
+    const results = await Promise.allSettled([
+      alt.check(post),
+      flairCheck.check(post),
+      fundraiserLimit.check(post),
+    ]);
+    for (const result of results) {
       if (result.status === 'rejected') {
         log.error('post check failed', { postId: post.id, reason: describeError(result.reason) });
       }
@@ -254,17 +258,22 @@ jobs.post('/alt-check', async (c) => {
  * at about a thousand posts anyway.
  */
 jobs.post('/alt-backfill', async (c) => {
-  const { log, alt, scheduler, settings } = getContainer();
+  const { log, alt, scheduler, settings, fundraiserLimit } = getContainer();
 
   try {
     const request = await c.req.json<TaskRequest>();
     const config = await settings.get();
-    if (!config.enabled || !config.altDetectionEnabled) return c.json<TaskResponse>({}, 200);
+    if (!config.enabled || (!config.altDetectionEnabled && config.fundraiserLimitHours <= 0)) {
+      return c.json<TaskResponse>({}, 200);
+    }
 
     const after = asPostId(String(request.data?.['after'] ?? ''));
     const batchIndex = readNumber(request.data, 'batchIndex');
 
-    const { indexed, last } = await alt.backfill(after);
+    const { indexed, last, posts } = await alt.backfill(after);
+    // Past fundraisers count towards the one-per-window rule, so a second one
+    // posted right after install is still caught. Recorded only, never reported.
+    for (const post of posts) await fundraiserLimit.record(post);
     log.info('fingerprint backfill batch done', { batchIndex, indexed });
 
     if (last && batchIndex + 1 < CONFIG.alt.maxBackfillBatches) {

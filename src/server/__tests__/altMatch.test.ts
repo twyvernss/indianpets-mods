@@ -351,9 +351,9 @@ describe('fingerprint storage', () => {
     );
 
     const first = await h.service.backfill(null);
-    expect(first).toEqual({ indexed: 50, last: 't3_p49' });
+    expect(first).toMatchObject({ indexed: 50, last: 't3_p49' });
     const second = await h.service.backfill(first.last);
-    expect(second).toEqual({ indexed: 10, last: null });
+    expect(second).toMatchObject({ indexed: 10, last: null });
   });
 
   it('indexes an old post on demand when its poster is looked up', async () => {

@@ -355,8 +355,16 @@ export function settingsFormResponse(
           flairField,
           {
             type: 'group',
-            label: 'Fundraisers posted under another flair',
+            label: 'Fundraiser rules',
             fields: [
+              {
+                type: 'number',
+                name: 'fundraiserLimitHours',
+                label: 'Hours between fundraisers from one person',
+                helpText:
+                  'A second fundraiser from the same person sooner than this is reported to the modqueue, e.g. "2nd fundraiser in 24h from u/name". Never removed. Counts posts under another flair too. 0 = no limit.',
+                defaultValue: current.fundraiserLimitHours,
+              },
               {
                 type: 'boolean',
                 name: 'reportMisflairedFundraisers',

@@ -79,6 +79,15 @@ No moderator's personal account ever appears on the post.
 - Ordinary posts cost no Reddit call: the text is checked first. Only applies once a fundraiser
   flair is chosen.
 
+**One fundraiser per person every 24 hours (v4)**
+- A second fundraiser from the same person inside the window is **reported**, never removed:
+  `2nd fundraiser in 24h from u/name: last one t3_abc 5h ago`. If AutoModerator already put the
+  post in the queue, this reason simply appears beside AutoModerator's.
+- A post counts when it has the fundraiser flair or looks like a fundraiser by its content, so
+  switching flair does not reset the clock. A same-link repost is left to the duplicate report.
+- The window is a setting (default 24 hours; 0 turns it off). The install scan records recent
+  fundraisers so the rule works from day one.
+
 **Everything else acts on the chosen fundraiser flair only.** Duplicate-link reports, alt reports
 (including matches to banned accounts) and the AutoModerator reply all skip posts with any other
 flair; the check above is what catches those.
@@ -262,6 +271,7 @@ Layer 1 wins over layer 2, which wins over the built-in defaults.
 | Name the verifying moderator in the public comment | **off** | Leave this off. Turning it on puts a moderator's username on the post, which is exactly what causes the unsolicited DMs this app exists to prevent. |
 | Which flair marks a fundraiser | none (every post) | A dropdown of the subreddit's real post flairs. When set, the bot only replies to and reports posts with that flair. Falls back to a text box on a subreddit with no flairs. |
 | Report posts that look like a fundraiser but have another flair | on | Reports, never removes. Needs a fundraiser flair chosen. |
+| Hours between fundraisers from one person | 24 | A second one sooner is reported, never removed. `0` = no limit. |
 | Saved notices | two starter notices, active immediately | Two or three pre-written verification notices a moderator picks from at verify time. One per block, separated by a line containing only `---`; the first line of each block is its name. |
 | Checklist items | built-in list | One item per line. Markdown bullets are tolerated. Max 20 items, 120 characters each. |
 | Compact checklist | on | One multi-select tick-list instead of a row of toggles. Keeps the form short, which matters on mobile. |

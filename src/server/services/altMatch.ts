@@ -189,7 +189,7 @@ export type AltService = {
   /** The scheduled check for a new post: index, match, and report if warranted. */
   check(post: PostContent): Promise<AltCheckOutcome>;
   /** Fingerprints one page of recent posts. Returns the last id, or null when done. */
-  backfill(after: T3 | null): Promise<{ indexed: number; last: T3 | null }>;
+  backfill(after: T3 | null): Promise<{ indexed: number; last: T3 | null; posts: PostContent[] }>;
   /** Called when the author deletes a post. */
   forgetPost(postId: T3): Promise<void>;
 };
@@ -310,14 +310,14 @@ export function createAltService(deps: AltDeps): AltService {
       return { kind: 'matched', top: worth ?? top, reported };
     },
 
-    async backfill(after): Promise<{ indexed: number; last: T3 | null }> {
+    async backfill(after): Promise<{ indexed: number; last: T3 | null; posts: PostContent[] }> {
       const posts = await reddit.listNewPosts(after, CONFIG.alt.backfillBatchSize);
       let indexed = 0;
       for (const post of posts) {
         if (await index(post)) indexed += 1;
       }
       const last = posts.at(-1)?.id ?? null;
-      return { indexed, last: posts.length < CONFIG.alt.backfillBatchSize ? null : last };
+      return { indexed, last: posts.length < CONFIG.alt.backfillBatchSize ? null : last, posts };
     },
 
     async forgetPost(postId): Promise<void> {
@@ -337,6 +337,9 @@ export function isPostContent(value: unknown): value is PostContent {
     typeof candidate['title'] === 'string' &&
     typeof candidate['body'] === 'string' &&
     typeof candidate['url'] === 'string' &&
-    typeof candidate['createdAtMs'] === 'number'
+    typeof candidate['createdAtMs'] === 'number' &&
+    (candidate['flairText'] === undefined ||
+      candidate['flairText'] === null ||
+      typeof candidate['flairText'] === 'string')
   );
 }

@@ -187,6 +187,11 @@
         "label": "Report posts that look like a fundraiser but have another flair (to the modqueue; never removes)",
         "defaultValue": true
       },
+      "fundraiserLimitHours": {
+        "type": "number",
+        "label": "Hours between fundraisers from one person (a second one sooner is reported, never removed; 0 = no limit)",
+        "defaultValue": 24
+      },
       "wikiLogEnabled": {
         "type": "boolean",
         "label": "Keep a durable verification log on a subreddit wiki page (survives the app being uninstalled)",

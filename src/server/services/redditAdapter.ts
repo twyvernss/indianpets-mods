@@ -26,6 +26,7 @@ function toPostContent(post: {
   body?: string | undefined;
   url: string;
   createdAt: Date;
+  flair?: { text?: string | undefined } | undefined;
 }): PostContent {
   return {
     id: post.id as T3,
@@ -34,6 +35,7 @@ function toPostContent(post: {
     body: post.body ?? '',
     url: post.url,
     createdAtMs: post.createdAt.getTime(),
+    flairText: post.flair?.text ?? null,
   };
 }
 

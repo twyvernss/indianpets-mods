@@ -60,6 +60,11 @@ export type PostContent = {
   body: string;
   url: string;
   createdAtMs: number;
+  /**
+   * Post flair as it was when the post was seen. Undefined when the source did
+   * not say, in which case a check that needs it reads the post itself.
+   */
+  flairText?: string | null;
 };
 
 /** One of a person's posts in this subreddit, for their history page. */

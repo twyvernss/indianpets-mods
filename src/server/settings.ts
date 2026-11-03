@@ -87,6 +87,11 @@ export type AppSettings = {
    * applies once a fundraiser flair is chosen; never removes anything.
    */
   reportMisflairedFundraisers: boolean;
+  /**
+   * One fundraiser per person per this many hours. A second inside the window
+   * is reported, never removed. 0 turns the rule off.
+   */
+  fundraiserLimitHours: number;
 
   /* --- alt accounts and ban evasion --- */
   /**
@@ -151,6 +156,7 @@ export const OVERRIDABLE_KEYS = [
   'modmailLogEnabled',
   'userHistoryEnabled',
   'reportMisflairedFundraisers',
+  'fundraiserLimitHours',
   'altDetectionEnabled',
   'altSimilarityPercent',
   'compactChecklist',
@@ -192,6 +198,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   userHistoryEnabled: true,
 
   reportMisflairedFundraisers: true,
+  fundraiserLimitHours: 24,
   altDetectionEnabled: true,
   altSimilarityPercent: 70,
   automodReplyEnabled: false,
@@ -420,6 +427,12 @@ export function parseSettings(raw: Record<string, unknown>): AppSettings {
     reportMisflairedFundraisers: coerceBoolean(
       raw['reportMisflairedFundraisers'],
       DEFAULT_SETTINGS.reportMisflairedFundraisers,
+    ),
+    fundraiserLimitHours: coerceNumber(
+      raw['fundraiserLimitHours'],
+      DEFAULT_SETTINGS.fundraiserLimitHours,
+      0,
+      CONFIG.duplicates.maxRepostWindowHours,
     ),
     altDetectionEnabled: coerceBoolean(
       raw['altDetectionEnabled'],
