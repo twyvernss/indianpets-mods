@@ -5,10 +5,11 @@ import type { Logger } from '../lib/logger.js';
 import type {
   AuthorSnapshot,
   CommentHandle,
-  ModNoteInput,
+  PostContent,
   PostSnapshot,
   RedditPort,
   SchedulerPort,
+  UserPostSummary,
   WikiPrivacy,
 } from '../services/redditPort.js';
 import type { AppSettings, SettingsReader } from '../settings.js';
@@ -132,7 +133,6 @@ export type FakeRedditOptions = {
       | 'approve'
       | 'comment'
       | 'distinguish'
-      | 'modNote'
       | 'report'
       | 'lock'
       | 'wiki'
@@ -148,7 +148,6 @@ export class FakeReddit implements RedditPort {
   public readonly comments: string[] = [];
   public readonly reports: { postId: T3; reason: string }[] = [];
   public readonly locked: T3[] = [];
-  public lastModNote: ModNoteInput | null = null;
 
   constructor(private readonly options: FakeRedditOptions = {}) {}
 
@@ -209,13 +208,6 @@ export class FakeReddit implements RedditPort {
     };
   }
 
-  async addModNote(input: ModNoteInput): Promise<void> {
-    this.calls.push('modNote');
-    const failure = this.options.failOn?.modNote;
-    if (failure) throw failure;
-    this.lastModNote = input;
-  }
-
   async reportPost(postId: T3, reason: string): Promise<void> {
     this.calls.push('report');
     const failure = this.options.failOn?.report;
@@ -272,6 +264,36 @@ export class FakeReddit implements RedditPort {
   async getPostFlairs(): Promise<{ id: string; text: string }[]> {
     this.calls.push('getPostFlairs');
     return [...(this.options.flairs ?? [])];
+  }
+
+  /** Usernames currently banned, compared case-insensitively. */
+  public banned = new Set<string>();
+  /** Post text served by `getPostContent`, keyed by post id. */
+  public readonly contents = new Map<T3, PostContent>();
+  /** A person's posts here, keyed by lower-case username. */
+  public readonly userPosts = new Map<string, UserPostSummary[]>();
+  /** The subreddit's /new listing, newest first. */
+  public newPosts: PostContent[] = [];
+
+  async isBanned(username: string): Promise<boolean> {
+    this.calls.push('isBanned');
+    return this.banned.has(username.toLowerCase());
+  }
+
+  async getPostContent(postId: T3): Promise<PostContent | null> {
+    this.calls.push('getPostContent');
+    return this.contents.get(postId) ?? null;
+  }
+
+  async getUserPostsHere(username: string): Promise<UserPostSummary[]> {
+    this.calls.push('getUserPostsHere');
+    return [...(this.userPosts.get(username.toLowerCase()) ?? [])];
+  }
+
+  async listNewPosts(after: T3 | null, limit: number): Promise<PostContent[]> {
+    this.calls.push('listNewPosts');
+    const start = after ? this.newPosts.findIndex((post) => post.id === after) + 1 : 0;
+    return this.newPosts.slice(start, start + limit);
   }
 }
 

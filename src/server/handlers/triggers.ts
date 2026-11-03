@@ -6,7 +6,7 @@ import type {
   OnPostSubmitRequest,
 } from '@devvit/web/shared';
 import { Hono } from 'hono';
-import { JOBS } from '../config.js';
+import { CONFIG, JOBS } from '../config.js';
 import { getContainer } from '../container.js';
 import { asPostId } from '../data/tokenRepo.js';
 import { describeError } from '../lib/logger.js';
@@ -27,6 +27,28 @@ function parseIsoMs(value: unknown, fallbackMs: number): number {
   if (typeof value !== 'string') return fallbackMs;
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : fallbackMs;
+}
+
+/**
+ * A post's `createdAt` is a number whose unit Devvit does not document, so
+ * seconds are told apart from milliseconds by size. An ISO string also works.
+ */
+function parseCreatedMs(value: unknown, fallbackMs: number): number {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return value < 1e12 ? value * 1000 : value;
+  }
+  return parseIsoMs(value, fallbackMs);
+}
+
+/**
+ * True when the author deleted the post, rather than a moderator removing it.
+ *
+ * The event's `source` is a protobuf enum that may arrive as its number or its
+ * name. Anything unrecognised counts as "not the author", so a fingerprint is
+ * kept rather than lost - it holds no post text either way.
+ */
+function deletedByAuthor(source: unknown): boolean {
+  return source === 1 || source === 'USER';
 }
 
 /**
@@ -69,23 +91,44 @@ triggers.post('/automod-filter-post', async (c) => {
  * worst case stays close to its best case.
  */
 triggers.post('/post-submit', async (c) => {
-  const { log, duplicates } = getContainer();
+  const { log, duplicates, settings, scheduler } = getContainer();
 
   try {
     const body = await c.req.json<OnPostSubmitRequest>();
     const postId = asPostId(body.post?.id ?? '');
 
     if (postId) {
-      await duplicates.inspectPost({
-        postId,
-        author: body.author?.name ?? null,
-        title: body.post?.title ?? '',
-        body: body.post?.selftext ?? '',
-        // For a link post this is the target; for a self post Reddit sets it to
-        // the post's own permalink, which `collectLinks` discards as an ignored
-        // host.
-        url: body.post?.url ?? '',
-      });
+      const author = body.author?.name ?? null;
+      const title = body.post?.title ?? '';
+      const text = body.post?.selftext ?? '';
+      // For a link post this is the target; for a self post Reddit sets it to
+      // the post's own permalink, which `collectLinks` discards as an ignored
+      // host.
+      const url = body.post?.url ?? '';
+
+      await duplicates.inspectPost({ postId, author, title, body: text, url });
+
+      // Alt matching reads a dozen or more Redis keys and may call Reddit for
+      // ban status, so it runs as a job. The text travels with the job, which
+      // saves the job fetching the post again.
+      const config = await settings.get();
+      if (config.enabled && config.altDetectionEnabled && author) {
+        const nowMs = Date.now();
+        await scheduler.runJob({
+          name: JOBS.altCheck,
+          data: {
+            post: {
+              id: postId,
+              authorName: author,
+              title,
+              body: text.slice(0, CONFIG.alt.maxBodyChars),
+              url,
+              createdAtMs: parseCreatedMs(body.post?.createdAt, nowMs),
+            },
+          },
+          runAt: new Date(nowMs + CONFIG.alt.checkDelaySeconds * 1000),
+        });
+      }
     }
   } catch (error) {
     log.error('post-submit trigger failed', { reason: describeError(error) });
@@ -148,16 +191,20 @@ triggers.post('/comment-create', async (c) => {
  * its URLs permanently claimed.
  */
 triggers.post('/post-delete', async (c) => {
-  const { log, repo, duplicates } = getContainer();
+  const { log, repo, duplicates, alt } = getContainer();
 
   try {
     const body = await c.req.json<OnPostDeleteRequest>();
     const postId = asPostId(body.postId ?? '');
 
     if (postId) {
+      // A moderator removal keeps the fingerprint: a banned user's removed
+      // posts are exactly what their next account needs to be matched against.
+      const byAuthor = deletedByAuthor((body as { source?: unknown }).source);
       await Promise.all([
         repo.markDeleted(postId, parseIsoMs(body.deletedAt, Date.now())),
         duplicates.forgetPost(postId),
+        byAuthor ? alt.forgetPost(postId) : Promise.resolve(),
       ]);
       log.info('post deleted; stored content scrubbed and links released', { postId });
     }
@@ -184,7 +231,14 @@ triggers.post('/app-upgrade', async (c) => {
       data: { offset: 0, batchIndex: 0 },
       runAt: new Date(Date.now() + 10_000),
     });
-    log.info('queued author history backfill after upgrade');
+    // Fingerprints recent posts, so alt matching has something to compare a
+    // new post with from the first day rather than only from now on.
+    await scheduler.runJob({
+      name: JOBS.altBackfill,
+      data: { after: '', batchIndex: 0 },
+      runAt: new Date(Date.now() + 30_000),
+    });
+    log.info('queued author history and fingerprint backfills after upgrade');
   } catch (error) {
     log.error('app-upgrade trigger failed', { reason: describeError(error) });
   }

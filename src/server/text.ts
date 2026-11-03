@@ -1,5 +1,5 @@
 import { CONFIG } from './config.js';
-import type { ChecklistItemResult, DuplicateFinding } from './types.js';
+import type { DuplicateFinding } from './types.js';
 
 /**
  * Every string a human ever sees. Edit here, not in the handlers.
@@ -31,7 +31,7 @@ export const FORM_TEXT = {
   verifyCancel: 'Cancel',
 
   noteLabel: 'Internal note (optional)',
-  noteHelp: 'Visible only to moderators, in the app record and the mod note. Never posted publicly.',
+  noteHelp: 'Visible only to moderators, in the app record and the moderator-only wiki log. Never posted publicly.',
   notePlaceholder: 'e.g. Called the clinic on 28 Sep, bill reference #4471 confirmed.',
 
   showChecklistLabel: 'Fill in the verification checklist',
@@ -45,12 +45,12 @@ export const FORM_TEXT = {
 } as const;
 
 export const TOASTS = {
-  notModerator: 'Only moderators of this community can verify fundraisers.',
+  notModerator: 'Only moderators of this community can use this.',
   notAPost: 'This action can only be run on a post.',
   postMissing: 'That post no longer exists, or it could not be loaded.',
   inProgress: 'Another verification for this post is already running. Give it a few seconds.',
   expired: 'This verification session expired. Close the form and choose "Verify fundraiser" again.',
-  noRecord: 'This post has not been verified by the app.',
+  noRecord: 'Not verified yet. Use "Verify fundraiser" once the documents check out.',
 } as const;
 
 export function alreadyVerifiedToast(modName: string, dateLabel: string): string {
@@ -59,42 +59,6 @@ export function alreadyVerifiedToast(modName: string, dateLabel: string): string
 
 export function verifiedToast(dateLabel: string): string {
   return `Verified. The post is approved and the notice is stickied (${dateLabel}).`;
-}
-
-/**
- * The status toast.
- *
- * Carries the follow-up state as well as the verification, because otherwise
- * there is no way to see at a glance whether the OP was ever asked for an
- * update and whether they answered. The app learns about a reply from the
- * comment trigger; this is where a moderator finds out.
- */
-export function statusToast(input: {
-  modName: string;
-  dateLabel: string;
-  hasChecklist: boolean;
-  hasNote: boolean;
-  reminderSentAtMs: number | null;
-  opRespondedAtMs: number | null;
-  escalatedAtMs: number | null;
-}): string {
-  const extras: string[] = [];
-  if (input.hasChecklist) extras.push('checklist filled');
-  if (input.hasNote) extras.push('note attached');
-  const suffix = extras.length > 0 ? ` (${extras.join(', ')})` : '';
-
-  // Most recent fact first: a reply supersedes the chase, and a report
-  // supersedes the wait.
-  let follow = '';
-  if (input.opRespondedAtMs !== null) {
-    follow = ' The OP replied after being asked for an update.';
-  } else if (input.escalatedAtMs !== null) {
-    follow = ' Reported to the modqueue: the OP never replied.';
-  } else if (input.reminderSentAtMs !== null) {
-    follow = ' The OP has been asked for an update and has not replied yet.';
-  }
-
-  return `Verified by u/${input.modName} on ${input.dateLabel}${suffix}.${follow}`;
 }
 
 export function heldByAutomodToast(dateLabel: string): string {
@@ -124,7 +88,7 @@ export function heldByAutomodToast(dateLabel: string): string {
 export const DEFAULT_NOTICE_TEMPLATE = [
   '## Fundraiser **Approved** by the r/{subreddit} mod team',
   '',
-  'The moderators of r/{subreddit} have reviewed documents submitted privately by the original poster for this fundraiser, and they were consistent with the fundraiser described here.',
+  'The moderators of r/{subreddit} have reviewed documents submitted by the original poster for this fundraiser, and they were consistent with the fundraiser described here.',
   '',
   '**This is not a guarantee.** We cannot audit how donated money is actually spent, we are not involved in this fundraiser, and documents can be forged or circumstances can change after a check is done. Please donate at your own discretion, and only what you can comfortably afford.',
   '',
@@ -253,7 +217,7 @@ export function buildStaleReportReason(daysSinceVerified: number): string {
  */
 export function buildDuplicateReportReason(
   finding: DuplicateFinding,
-  context: { previouslyVerified: boolean; minimumHours: number },
+  context: { previouslyVerified: boolean; minimumHours: number; originalBanned?: boolean },
 ): string {
   const shortNote = finding.shortened ? ' [short link unchecked]' : '';
   const verified = context.previouslyVerified ? ' - earlier post was verified' : '';
@@ -269,10 +233,61 @@ export function buildDuplicateReportReason(
   }
 
   const original = finding.originalAuthor ? `u/${finding.originalAuthor}` : 'a deleted account';
+  if (context.originalBanned) {
+    return truncate(
+      `Possible ban evasion: same fundraiser link as BANNED ${original} (${finding.originalPostId})${shortNote}`,
+      CONFIG.reportReasonMaxLength,
+    );
+  }
   return truncate(
     `Same fundraiser link as post ${finding.originalPostId} by ${original}${verified}${shortNote}`,
     CONFIG.reportReasonMaxLength,
   );
+}
+
+/** The fields of an account match the wording below needs. */
+type MatchSummary = {
+  author: string;
+  shared: Partial<Record<'upi' | 'phone' | 'bank' | 'link', number>>;
+  textSimilarity: number;
+  banned: boolean;
+};
+
+/**
+ * What two accounts share, in a few words: "same UPI ID, phone; 82% same wording".
+ *
+ * Wording below 30% is left out: it is noise, and printing it next to a shared
+ * phone number would make a strong match read as a weak one.
+ */
+export function describeMatch(match: MatchSummary): string {
+  const things: string[] = [];
+  if (match.shared.upi) things.push('UPI ID');
+  if (match.shared.phone) things.push('phone');
+  if (match.shared.bank) things.push('bank account');
+  if (match.shared.link) things.push(match.shared.link === 1 ? 'link' : `${match.shared.link} links`);
+
+  const parts: string[] = [];
+  if (things.length > 0) parts.push(`same ${things.join(', ')}`);
+  if (match.textSimilarity >= 0.3) parts.push(`${Math.round(match.textSimilarity * 100)}% same wording`);
+  return parts.join('; ');
+}
+
+/** Modqueue reason for a post that looks like another account's. */
+export function buildAltReportReason(match: MatchSummary): string {
+  const who = `u/${match.author}${match.banned ? ' (BANNED here)' : ''}`;
+  return truncate(`Possible alt of ${who}: ${describeMatch(match)}`, CONFIG.reportReasonMaxLength);
+}
+
+/** Toast after the history page is rebuilt from a menu action. */
+export function historyReadyToast(input: {
+  username: string;
+  postCount: number;
+  top: MatchSummary | null;
+}): string {
+  const posts = `${input.postCount} post${input.postCount === 1 ? '' : 's'} here`;
+  if (!input.top) return `u/${input.username}: ${posts}. No other account matches their posts.`;
+  const banned = input.top.banned ? ' (banned)' : '';
+  return `u/${input.username}: ${posts}. Closest match u/${input.top.author}${banned}: ${describeMatch(input.top)}.`;
 }
 
 /** Appended to a report when the author is below the configured thresholds. */
@@ -284,31 +299,6 @@ export function buildAuthorRiskNote(input: {
 }): string {
   if (!input.belowAge && !input.belowKarma) return '';
   return ` (new account: ${input.accountAgeDays}d, ${input.karma} karma)`;
-}
-
-/**
- * Builds the mod note body.
- *
- * Reddit caps mod notes at 250 characters, so this is assembled
- * highest-value-first and the caller truncates: who verified, when, how many
- * checklist items were ticked, then as much of the note as still fits.
- */
-export function buildModNote(input: {
-  modName: string;
-  dateLabel: string;
-  checklist: ChecklistItemResult[] | null;
-  note: string;
-}): string {
-  const parts = [`Fundraiser verified by u/${input.modName} on ${input.dateLabel}.`];
-
-  if (input.checklist && input.checklist.length > 0) {
-    const ticked = input.checklist.filter((item) => item.checked).length;
-    parts.push(`Checklist ${ticked}/${input.checklist.length}.`);
-  }
-
-  if (input.note.length > 0) parts.push(input.note);
-
-  return parts.join(' ');
 }
 
 /** Substitutes `{name}` tokens. Unknown tokens are left alone, not blanked.
@@ -435,6 +425,8 @@ export const FOLLOW_UP_TEXT = {
  * must never be vague about the lock, which is the one visible consequence.
  */
 export function followUpDescription(input: {
+  verifiedBy: string;
+  verifiedOn: string;
   daysSinceVerified: number;
   daysSinceReminder: number | null;
   escalated: boolean;
@@ -444,7 +436,9 @@ export function followUpDescription(input: {
   remindersEnabled: boolean;
   lockStalePosts: boolean;
 }): string {
-  const parts: string[] = [`Verified ${dayCount(input.daysSinceVerified)} ago.`];
+  const parts: string[] = [
+    `Verified by u/${input.verifiedBy} on ${input.verifiedOn} (${dayCount(input.daysSinceVerified)} ago).`,
+  ];
 
   if (input.daysSinceReminder === null) {
     parts.push('No update has been requested yet.');
@@ -504,7 +498,7 @@ export function alreadyEscalatedToast(dateLabel: string): string {
 /* ------------------------------------------------------------------------ */
 
 export const WIKI_CHECK_TEXT = {
-  off: 'The wiki log is switched off. Turn on "Keep a durable verification log" in the settings menu.',
+  off: 'The wiki log is switched off. Turn on "Keep the verification log on the wiki" in Fundraiser tools settings.',
 } as const;
 
 export function wikiCheckReadyToast(input: {
@@ -561,4 +555,4 @@ export function sweepToast(result: {
 }
 
 export const SWEEP_DISABLED =
-  'The nightly check is switched off. Turn on "Ask the OP for an update on old verified fundraisers" in the settings menu.';
+  'The nightly check is switched off. Turn on "Ask the OP for an update on old fundraisers" in Fundraiser tools settings.';

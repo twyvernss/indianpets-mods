@@ -20,7 +20,6 @@ export type AppSettings = {
   enabled: boolean;
 
   /* --- verification --- */
-  addModNote: boolean;
   /**
    * Name the verifying moderator in the PUBLIC comment.
    * Defaults to false on purpose: naming mods publicly is what generates the
@@ -76,6 +75,24 @@ export type AppSettings = {
   wikiLogPage: string;
   /** Also post each verification to Mod Discussions. Off by default: noisy. */
   modmailLogEnabled: boolean;
+  /**
+   * Keep a moderator-only wiki page per poster, under `{wikiLogPage}/users/`,
+   * listing every post they made here with links, who verified what, and
+   * which other accounts their posts resemble.
+   */
+  userHistoryEnabled: boolean;
+
+  /* --- alt accounts and ban evasion --- */
+  /**
+   * Compare each new post with other accounts' posts - UPI IDs, phone numbers,
+   * bank accounts, links and wording - and report likely alts to the modqueue.
+   */
+  altDetectionEnabled: boolean;
+  /**
+   * How much of the wording two posts must share, in percent, to count as a
+   * match on its own. Shared payment details count regardless.
+   */
+  altSimilarityPercent: number;
 
   /* --- duplicate link detection --- */
   duplicateDetectionEnabled: boolean;
@@ -118,7 +135,6 @@ export type AppSettings = {
 /** Keys a moderator may override at runtime. Anything else is ignored. */
 export const OVERRIDABLE_KEYS = [
   'enabled',
-  'addModNote',
   'showVerifyingModInComment',
   'customNoticeText',
   'messageTemplates',
@@ -127,6 +143,9 @@ export const OVERRIDABLE_KEYS = [
   'wikiLogEnabled',
   'wikiLogPage',
   'modmailLogEnabled',
+  'userHistoryEnabled',
+  'altDetectionEnabled',
+  'altSimilarityPercent',
   'compactChecklist',
   'automodReplyEnabled',
   'automodReplyText',
@@ -150,7 +169,6 @@ export type OverridableKey = (typeof OVERRIDABLE_KEYS)[number];
 export const DEFAULT_SETTINGS: AppSettings = {
   enabled: true,
 
-  addModNote: true,
   showVerifyingModInComment: false,
   customNoticeText: '',
   // Left empty here on purpose: DEFAULT_SETTINGS is evaluated at module load,
@@ -164,6 +182,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   wikiLogEnabled: true,
   wikiLogPage: 'fundraiser-verifications',
   modmailLogEnabled: false,
+  userHistoryEnabled: true,
+
+  altDetectionEnabled: true,
+  altSimilarityPercent: 70,
   automodReplyEnabled: false,
   automodReplyText: '',
   showAuthorSummary: true,
@@ -356,7 +378,6 @@ export function parseSettings(raw: Record<string, unknown>): AppSettings {
   return {
     enabled: coerceBoolean(raw['enabled'], DEFAULT_SETTINGS.enabled),
 
-    addModNote: coerceBoolean(raw['addModNote'], DEFAULT_SETTINGS.addModNote),
     showVerifyingModInComment: coerceBoolean(
       raw['showVerifyingModInComment'],
       DEFAULT_SETTINGS.showVerifyingModInComment,
@@ -383,6 +404,21 @@ export function parseSettings(raw: Record<string, unknown>): AppSettings {
       coerceString(raw['wikiLogPage'], DEFAULT_SETTINGS.wikiLogPage),
     ),
     modmailLogEnabled: coerceBoolean(raw['modmailLogEnabled'], DEFAULT_SETTINGS.modmailLogEnabled),
+    userHistoryEnabled: coerceBoolean(
+      raw['userHistoryEnabled'],
+      DEFAULT_SETTINGS.userHistoryEnabled,
+    ),
+
+    altDetectionEnabled: coerceBoolean(
+      raw['altDetectionEnabled'],
+      DEFAULT_SETTINGS.altDetectionEnabled,
+    ),
+    altSimilarityPercent: coerceNumber(
+      raw['altSimilarityPercent'],
+      DEFAULT_SETTINGS.altSimilarityPercent,
+      CONFIG.alt.minSimilarityPercent,
+      CONFIG.alt.maxSimilarityPercent,
+    ),
     automodReplyEnabled: coerceBoolean(
       raw['automodReplyEnabled'],
       DEFAULT_SETTINGS.automodReplyEnabled,

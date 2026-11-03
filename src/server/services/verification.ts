@@ -8,7 +8,7 @@ import type { Logger } from '../lib/logger.js';
 import { describeError } from '../lib/logger.js';
 import { formatDisplayDate, formatShortDate } from '../lib/time.js';
 import type { SettingsReader } from '../settings.js';
-import { buildModNote, buildVerificationComment, formatAuthorSummary } from '../text.js';
+import { buildVerificationComment, formatAuthorSummary } from '../text.js';
 import type {
   ChecklistItem,
   ChecklistItemResult,
@@ -344,7 +344,7 @@ export function createVerificationService(deps: VerificationDeps): VerificationS
    *  3. approve and comment CONCURRENTLY - they are independent;
    *  4. distinguish+sticky only once the comment exists;
    *  5. promote the record to `complete`;
-   *  6. mod note last, as the only genuinely optional step.
+   *  6. queue the wiki log, which is the durable record of who verified what.
    */
   async function runVerification(args: {
     postId: T3;
@@ -440,22 +440,6 @@ export function createVerificationService(deps: VerificationDeps): VerificationS
     } catch (error) {
       warnings.push('the verification log entry could not be queued');
       scoped.error('could not queue the audit log entry', { reason: describeError(error) });
-    }
-
-    if (appSettings.addModNote && post.authorName) {
-      try {
-        await reddit.addModNote({
-          username: post.authorName,
-          postId,
-          note: buildModNote({ modName: username, dateLabel, checklist, note }).slice(
-            0,
-            CONFIG.modNoteMaxLength,
-          ),
-        });
-      } catch (error) {
-        warnings.push('the mod note could not be added');
-        scoped.warn('mod note failed', { reason: describeError(error) });
-      }
     }
 
     scoped.info('verification complete', {

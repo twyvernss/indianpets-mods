@@ -8,12 +8,32 @@ import { withRetry } from '../lib/retry.js';
 import type {
   AuthorSnapshot,
   CommentHandle,
-  ModNoteInput,
+  PostContent,
   PostSnapshot,
   RedditPort,
   SchedulerPort,
+  UserPostSummary,
   WikiPrivacy,
 } from './redditPort.js';
+
+/** The fields alt matching reads, from a Devvit post model. */
+function toPostContent(post: {
+  id: string;
+  authorName: string;
+  title: string;
+  body?: string | undefined;
+  url: string;
+  createdAt: Date;
+}): PostContent {
+  return {
+    id: post.id as T3,
+    authorName: post.authorName && post.authorName !== '[deleted]' ? post.authorName : null,
+    title: post.title,
+    body: post.body ?? '',
+    url: post.url,
+    createdAtMs: post.createdAt.getTime(),
+  };
+}
 
 /**
  * The real implementations of {@link RedditPort} and {@link SchedulerPort},
@@ -97,20 +117,6 @@ export function createRedditAdapter(log: Logger): RedditPort {
           await run('distinguish', () => comment.distinguish(true));
         },
       };
-    },
-
-    async addModNote(input: ModNoteInput): Promise<void> {
-      await run('addModNote', () =>
-        reddit.addModNote({
-          subreddit: context.subredditName,
-          user: input.username,
-          note: input.note,
-          redditId: input.postId,
-          // No `label`: Devvit's UserNoteLabel enum only offers ban/warning
-          // style labels plus SOLID_CONTRIBUTOR/HELPFUL_USER. None of them mean
-          // "fundraiser verified", so an unlabelled note is honest.
-        }),
-      );
     },
 
     async reportPost(postId: T3, reason: string): Promise<void> {
@@ -220,6 +226,65 @@ export function createRedditAdapter(log: Logger): RedditPort {
           subredditId: context.subredditId,
         }),
       );
+    },
+
+    async isBanned(username: string): Promise<boolean> {
+      try {
+        // Passing `username` filters server-side: 0 or 1 entries.
+        const banned = await run('getBannedUsers', () =>
+          reddit.getBannedUsers({ subredditName: context.subredditName, username }).all(),
+        );
+        return banned.some((user) => user.username.toLowerCase() === username.toLowerCase());
+      } catch (error) {
+        log.warn('ban status could not be read', { username, reason: describeError(error) });
+        return false;
+      }
+    },
+
+    async getPostContent(postId: T3): Promise<PostContent | null> {
+      try {
+        const post = await run('getPostById(content)', () => reddit.getPostById(postId));
+        return toPostContent(post);
+      } catch (error) {
+        log.warn('post content could not be loaded', { postId, reason: describeError(error) });
+        return null;
+      }
+    },
+
+    async getUserPostsHere(username: string, scanLimit: number): Promise<UserPostSummary[]> {
+      try {
+        const posts = await run('getPostsByUser', () =>
+          reddit.getPostsByUser({ username, sort: 'new', limit: scanLimit, pageSize: 100 }).all(),
+        );
+        const here = context.subredditName.toLowerCase();
+        return posts
+          .filter((post) => post.subredditName.toLowerCase() === here)
+          .map((post) => ({
+            id: post.id as T3,
+            createdAtMs: post.createdAt.getTime(),
+            flairText: post.flair?.text ?? null,
+            removed: post.isRemoved() || post.isSpam(),
+          }));
+      } catch (error) {
+        // A suspended or deleted account cannot be read. The page still shows
+        // what the app itself recorded.
+        log.warn('user posts could not be listed', { username, reason: describeError(error) });
+        return [];
+      }
+    },
+
+    async listNewPosts(after: T3 | null, limit: number): Promise<PostContent[]> {
+      const posts = await run('getNewPosts', () =>
+        reddit
+          .getNewPosts({
+            subredditName: context.subredditName,
+            limit,
+            pageSize: limit,
+            ...(after ? { after } : {}),
+          })
+          .all(),
+      );
+      return posts.map(toPostContent);
     },
 
     async getPostFlairs(): Promise<{ id: string; text: string }[]> {

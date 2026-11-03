@@ -172,6 +172,20 @@ describe('report', () => {
     expect(h.reddit.reports[0]?.reason).toContain('u/alice');
   });
 
+  it('calls out ban evasion when the earlier poster is banned', async () => {
+    const h = harness();
+    h.reddit.banned.add('alice');
+    await h.service.inspectPost(post('t3_first', 'alice', KETTO));
+    const finding = await h.service.inspectPost(post('t3_second', 'bob', KETTO));
+    if (!finding) throw new Error('expected a finding');
+
+    await h.service.report(finding);
+
+    expect(h.reddit.reports[0]?.reason).toContain('Possible ban evasion');
+    expect(h.reddit.reports[0]?.reason).toContain('BANNED u/alice');
+    expect(h.reddit.reports[0]?.reason.length).toBeLessThanOrEqual(100);
+  });
+
   it('uses quieter wording for a same-author repost', async () => {
     const h = harness();
     await h.service.inspectPost(post('t3_first', 'alice', KETTO));

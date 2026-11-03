@@ -5,6 +5,7 @@ import { getContainer } from '../container.js';
 import { describeError } from '../lib/logger.js';
 import { asPostId } from '../data/tokenRepo.js';
 import { isVerificationRecord } from '../data/verificationRepo.js';
+import { isPostContent } from '../services/altMatch.js';
 import { isDuplicateFinding } from '../services/duplicates.js';
 
 export const jobs = new Hono();
@@ -167,7 +168,7 @@ jobs.post('/author-backfill', async (c) => {
  * calls. The record travelled here as JSON, so it is re-validated before use.
  */
 jobs.post('/audit-log', async (c) => {
-  const { log, audit } = getContainer();
+  const { log, audit, scheduler, settings } = getContainer();
 
   try {
     const request = await c.req.json<TaskRequest>();
@@ -179,8 +180,101 @@ jobs.post('/audit-log', async (c) => {
     }
 
     await audit.record(raw);
+
+    // The poster's history page shows who verified what, so it is refreshed
+    // whenever one of their fundraisers is verified.
+    const config = await settings.get();
+    if (raw.authorName && config.userHistoryEnabled) {
+      await scheduler.runJob({
+        name: JOBS.userHistory,
+        data: { username: raw.authorName },
+        runAt: new Date(Date.now() + CONFIG.history.delaySeconds * 1000),
+      });
+    }
   } catch (error) {
     log.error('audit log job failed', { reason: describeError(error) });
+  }
+
+  return c.json<TaskResponse>({}, 200);
+});
+
+/**
+ * Fingerprints a new post and reports it if it looks like another account's.
+ *
+ * Queued by the post-submit trigger with the post's text, which is
+ * re-validated here because it travelled through the scheduler as JSON.
+ */
+jobs.post('/alt-check', async (c) => {
+  const { log, alt } = getContainer();
+
+  try {
+    const request = await c.req.json<TaskRequest>();
+    const post = request.data?.['post'];
+
+    if (!isPostContent(post)) {
+      log.warn('alt-check job carried an unusable post');
+      return c.json<TaskResponse>({}, 200);
+    }
+
+    await alt.check(post);
+  } catch (error) {
+    log.error('alt check job failed', { reason: describeError(error) });
+  }
+
+  return c.json<TaskResponse>({}, 200);
+});
+
+/**
+ * Fingerprints the subreddit's recent posts, one page per run.
+ *
+ * Without this, matching only knows about posts made after the feature was
+ * installed. Bounded to `maxBackfillBatches` pages; Reddit's own listing stops
+ * at about a thousand posts anyway.
+ */
+jobs.post('/alt-backfill', async (c) => {
+  const { log, alt, scheduler, settings } = getContainer();
+
+  try {
+    const request = await c.req.json<TaskRequest>();
+    const config = await settings.get();
+    if (!config.enabled || !config.altDetectionEnabled) return c.json<TaskResponse>({}, 200);
+
+    const after = asPostId(String(request.data?.['after'] ?? ''));
+    const batchIndex = readNumber(request.data, 'batchIndex');
+
+    const { indexed, last } = await alt.backfill(after);
+    log.info('fingerprint backfill batch done', { batchIndex, indexed });
+
+    if (last && batchIndex + 1 < CONFIG.alt.maxBackfillBatches) {
+      await scheduler.runJob({
+        name: JOBS.altBackfill,
+        data: { after: last, batchIndex: batchIndex + 1 },
+        runAt: new Date(Date.now() + 5_000),
+      });
+    }
+  } catch (error) {
+    log.error('fingerprint backfill failed', { reason: describeError(error) });
+  }
+
+  return c.json<TaskResponse>({}, 200);
+});
+
+/** Rebuilds one person's wiki history page, after a verification or a report. */
+jobs.post('/user-history', async (c) => {
+  const { log, history } = getContainer();
+
+  try {
+    const request = await c.req.json<TaskRequest>();
+    const username = request.data?.['username'];
+
+    if (typeof username !== 'string' || !/^[\w-]{1,30}$/u.test(username)) {
+      log.warn('user-history job carried an unusable username');
+      return c.json<TaskResponse>({}, 200);
+    }
+
+    await history.rebuild(username);
+  } catch (error) {
+    log.error('user history job failed', { reason: describeError(error) });
   }
 
   return c.json<TaskResponse>({}, 200);

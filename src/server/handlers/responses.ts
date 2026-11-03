@@ -1,4 +1,5 @@
 import type { UiResponse } from '@devvit/web/shared';
+import type { HistoryResult } from '../services/userHistory.js';
 import type { FollowUpResult } from '../services/reminders.js';
 import { formatVerifiedDate } from '../services/verification.js';
 import {
@@ -7,7 +8,9 @@ import {
   alreadyVerifiedToast,
   escalatedToast,
   FOLLOW_UP_TOASTS,
+  historyReadyToast,
   TOASTS,
+  wikiCheckBlockedToast,
   verifiedToast,
 } from '../text.js';
 import type { VerifyOutcome } from '../types.js';
@@ -125,3 +128,37 @@ export const UNEXPECTED_ERROR: UiResponse = {
     appearance: 'neutral',
   },
 };
+
+/**
+ * Maps a history rebuild onto a toast, and opens the page when it is ready.
+ *
+ * The toast names the closest matching account so a moderator gets the answer
+ * to "is this someone we banned?" without reading the page at all.
+ */
+export function historyResponse(
+  result: HistoryResult,
+  username: string,
+  subredditName: string,
+): UiResponse {
+  switch (result.kind) {
+    case 'off':
+      return {
+        showToast: {
+          text: 'History pages are off. Turn on the wiki log and "Keep a wiki history page for each poster" in Fundraiser tools settings.',
+          appearance: 'neutral',
+        },
+      };
+
+    case 'blocked':
+      return { showToast: { text: wikiCheckBlockedToast(result.reason), appearance: 'neutral' } };
+
+    case 'ready':
+      return {
+        showToast: {
+          text: historyReadyToast({ username, postCount: result.postCount, top: result.top }),
+          appearance: result.top?.banned ? 'neutral' : 'success',
+        },
+        navigateTo: `https://www.reddit.com/r/${subredditName}/wiki/${result.page}`,
+      };
+  }
+}

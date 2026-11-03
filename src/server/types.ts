@@ -46,7 +46,7 @@ export type VerificationRecord = {
   modName: string;
   verifiedAtMs: number;
   status: VerificationStatus;
-  /** Internal note. Never posted publicly; may be copied into a mod note. */
+  /** Internal note. Never posted publicly; copied into the moderator-only wiki log. */
   note: string;
   /** Null when the moderator used the quick path. */
   checklist: ChecklistItemResult[] | null;

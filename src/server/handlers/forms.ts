@@ -7,6 +7,7 @@ import { asPostId } from '../data/tokenRepo.js';
 import {
   CHECKLIST_FIELD,
   FOLLOW_UP_FIELD,
+  LOOKUP_FIELD,
   NOTICE_SLOTS,
   noticeFieldNames,
 } from '../formDefinitions.js';
@@ -21,7 +22,7 @@ import type { FollowUpStep } from '../services/reminders.js';
 import { messageTemplatesToText, pickOverrides } from '../settings.js';
 import { TOASTS } from '../text.js';
 import type { MessageTemplate, VerifyFormValues } from '../types.js';
-import { followUpResponse, toastFor, UNEXPECTED_ERROR } from './responses.js';
+import { followUpResponse, historyResponse, toastFor, UNEXPECTED_ERROR } from './responses.js';
 
 export const forms = new Hono();
 
@@ -258,6 +259,35 @@ forms.post('/follow-up-submit', async (c) => {
     return c.json<UiResponse>(followUpResponse(result));
   } catch (error) {
     log.error('follow-up-submit failed', { reason: describeError(error) });
+    return c.json<UiResponse>(UNEXPECTED_ERROR);
+  }
+});
+
+/** "Look up a poster's history" submitted: rebuild their page and open it. */
+forms.post('/user-lookup-submit', async (c) => {
+  const { log, gate, reddit, history } = getContainer();
+
+  try {
+    const moderator = await gate.actingUsername();
+    if (!moderator || !(await gate.isModerator(moderator))) {
+      return c.json<UiResponse>({
+        showToast: { text: TOASTS.notModerator, appearance: 'neutral' },
+      });
+    }
+
+    const body = await c.req.json<Record<string, unknown>>();
+    const typed = sanitizeText(body[LOOKUP_FIELD], 40).replace(/^\/?u\//iu, '').trim();
+    if (!/^[\w-]{3,20}$/u.test(typed)) {
+      return c.json<UiResponse>({
+        showToast: { text: `"${typed}" is not a valid Reddit username.`, appearance: 'neutral' },
+      });
+    }
+
+    const result = await history.rebuild(typed);
+    log.info('poster history looked up', { mod: moderator, kind: result.kind });
+    return c.json<UiResponse>(historyResponse(result, typed, reddit.subredditName()));
+  } catch (error) {
+    log.error('user-lookup-submit failed', { reason: describeError(error) });
     return c.json<UiResponse>(UNEXPECTED_ERROR);
   }
 });

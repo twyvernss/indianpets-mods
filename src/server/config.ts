@@ -36,9 +36,6 @@ export const CONFIG = {
   /** App settings are re-read at most this often; they change very rarely. */
   settingsCacheMs: 60 * 1000,
 
-  /** Reddit's hard limit on a mod note is 250 characters. */
-  modNoteMaxLength: 250,
-
   /** Reddit truncates custom report reasons; keep well inside it. */
   reportReasonMaxLength: 100,
 
@@ -108,6 +105,43 @@ export const CONFIG = {
     maxRepostWindowHours: 8760,
   },
 
+  alt: {
+    /** Fingerprints are kept about as long as link ownership. */
+    fingerprintTtlSeconds: 365 * 24 * 60 * 60,
+    /** Stops the same post being reported as a possible alt twice. */
+    reportedTtlSeconds: 30 * 24 * 60 * 60,
+    /**
+     * Newest posts read per identifier or wording bucket. A shelter's UPI ID
+     * shared by hundreds of posts must not make one check read hundreds.
+     */
+    postsPerKey: 50,
+    /** Ceiling on candidate posts compared in one check. */
+    maxCandidates: 300,
+    /** Accounts reported, shown in a toast, or listed on a history page. */
+    topMatches: 5,
+    /** Delay before the check job runs, so the duplicate-link report lands first. */
+    checkDelaySeconds: 20,
+    /** Post text carried through the scheduler. Long enough for any real appeal. */
+    maxBodyChars: 10_000,
+    /** Bounds on the moderator-configurable wording threshold. */
+    minSimilarityPercent: 40,
+    maxSimilarityPercent: 100,
+    /** Recent subreddit posts fingerprinted per backfill run, and how many runs. */
+    backfillBatchSize: 50,
+    maxBackfillBatches: 20,
+  },
+
+  history: {
+    /** The user's own posts read from Reddit when building their page. */
+    postsToScan: 300,
+    /** Rows on a history page. */
+    maxRows: 100,
+    /** Their own posts whose matches are gathered for the page. */
+    postsToMatch: 10,
+    /** Delay before a rebuild queued by a verification or report. */
+    delaySeconds: 15,
+  },
+
   intake: {
     /**
      * Delay before the "what we need from you" reply is posted after
@@ -164,6 +198,12 @@ export const JOBS = {
   authorBackfill: 'author-backfill',
   /** Appends one verification to the durable wiki log. */
   auditLog: 'audit-log',
+  /** Fingerprints a new post and reports it if it looks like another account's. */
+  altCheck: 'alt-check',
+  /** Fingerprints recent posts so matching has history to compare against. */
+  altBackfill: 'alt-backfill',
+  /** Rebuilds one person's moderator-only wiki history page. */
+  userHistory: 'user-history',
 } as const;
 
 /**

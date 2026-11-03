@@ -11,7 +11,7 @@ from their personal account, which earned them unsolicited DMs.
 With this app a moderator picks **Verify fundraiser** from the post's menu, optionally adds a note
 or fills in a checklist, and the app does the rest: it approves the post, posts a verification
 notice **as the app account** (`u/indianpets-mods`), pins and distinguishes that notice so it
-carries the green MOD tag, records what happened, and optionally leaves a mod note on the poster.
+carries the green MOD tag, and records who verified it, when and why on a moderator-only wiki page.
 
 No moderator's personal account ever appears on the post.
 
@@ -52,10 +52,39 @@ No moderator's personal account ever appears on the post.
 **Stale fundraisers (v2)**
 - A nightly job finds verified fundraisers older than *N* days (default 30) and asks the OP for an
   update or a "completed" confirmation.
-- If the OP replies, the chase stops immediately — the app watches for their comment rather than
-  polling.
-- If nobody replies within the grace period (default 7 days), the post is reported to the modqueue.
-  Locking is available and **off by default**.
+- After the grace period (default 1 day) the post is reported to the modqueue **whether or not the
+  OP replied** — a reply is not always an answer. The reply is recorded and shown. Turn off
+  "Report even if the OP replied" to let a reply close the chase instead.
+- Locking is available and **off by default**.
+
+**Poster history pages (v4)**
+- Every poster gets a moderator-only wiki page at `fundraiser-verifications/users/<username>`:
+  account age and karma, whether they are banned here, **every post they made here with a link to
+  each**, its flair and whether it is up or removed, **who verified it and when**, and the mod note.
+- It also lists the **other accounts their posts match**, strongest first, with links to those
+  accounts' matching posts.
+- Open it from any post (**Poster history & matches**) or by typing a username (subreddit menu →
+  **Look up a poster's history**). The toast already names the closest match, so most of the time
+  you do not need to open the page at all.
+- Pages are rebuilt from Reddit each time, never appended to, and carry no post titles — a post the
+  author deletes simply drops off. `fundraiser-verifications/users` lists every page.
+
+**Alt accounts and ban evasion (v4)**
+- Every new post is fingerprinted: **UPI IDs, Indian mobile numbers, bank account numbers** (only
+  when labelled "A/c" or similar), fundraiser links, and the wording itself (MinHash over
+  three-word phrases, so a lightly edited copy of a story still matches).
+- The post is compared with every other account's posts. A post that shares payment details with
+  another account, copies another account's story (70% by default), or matches a **banned**
+  account at all is **reported to the modqueue**, e.g.
+  `Possible alt of u/old_account (BANNED here): same UPI ID, phone; 82% same wording`.
+- Shared links alone are left to the duplicate detector, so one post is not reported twice. That
+  report now says `Possible ban evasion: same fundraiser link as BANNED u/…` when it applies.
+- Payment details are **hashed** before they are stored: Redis can say two posts share a phone
+  number but cannot say what the number is. No post text is stored.
+- A post a moderator removes **keeps** its fingerprint — a banned user's removed posts are exactly
+  what their next account must be matched against. A post the author deletes is forgotten.
+- On upgrade the app fingerprints the subreddit's ~1,000 most recent posts, so matching works from
+  day one. Removed posts older than that were never seen and cannot be matched.
 
 ## What the app does and does not claim
 
@@ -137,7 +166,7 @@ streams logs. You can pin a default subreddit by adding this to `devvit.json`:
    stickied comment from the app account with the green MOD tag, and a success toast.
 4. Run **Verify fundraiser** again on the same post. Expect: "Already verified by u/…" and **no
    second comment**. This is the idempotency guarantee.
-5. Run **Fundraiser verification status**. Expect the same details echoed back.
+5. Run **Fundraiser status & follow-up**. Expect a form whose description starts "Verified by u/… on …".
 6. Check the form header shows the author's account age, karma and previous-fundraiser count.
 7. From the subreddit's `...` menu, open **Fundraiser tools settings**, change something, save, and
    confirm the change took effect on the next action.
@@ -146,7 +175,12 @@ streams logs. You can pin a default subreddit by adding this to `devvit.json`:
 9. Post the same link twice from the **same** account. Within the waiting period it is reported
    with "Reposted after Nh, minimum is 24h"; set the waiting period to 0 in settings and it is not
    reported at all.
-10. Check `devvit logs` for the structured JSON lines.
+10. Run **Poster history & matches** on the post. Expect a toast and the wiki page opening, listing
+    the post with a link and who verified it.
+11. From a second account, post the first account's UPI ID (e.g. `test.dog@okaxis`) in a new post.
+    Within about thirty seconds it should be reported as `Possible alt of u/…`. Ban the first
+    account and repeat with a third: the reason should say `(BANNED here)`.
+12. Check `devvit logs` for the structured JSON lines.
 
 Testing the reminder flow without waiting 30 days: set **Days after verification** to `1` in the
 settings form, verify a post, and either wait for the nightly job or trigger it from the Devvit
@@ -200,7 +234,6 @@ Layer 1 wins over layer 2, which wins over the built-in defaults.
 | Setting | Default | Effect |
 | --- | --- | --- |
 | App enabled | on | Master switch. Off means the app takes no action at all. |
-| Add a mod note on the OP | on | Records who verified and when. Skipped if the poster's account is deleted. |
 | Name the verifying moderator in the public comment | **off** | Leave this off. Turning it on puts a moderator's username on the post, which is exactly what causes the unsolicited DMs this app exists to prevent. |
 | Which flair marks a fundraiser | none (every post) | A dropdown of the subreddit's real post flairs. When set, the bot only replies to and reports posts with that flair. Falls back to a text box on a subreddit with no flairs. |
 | Saved notices | two starter notices, active immediately | Two or three pre-written verification notices a moderator picks from at verify time. One per block, separated by a line containing only `---`; the first line of each block is its name. |
@@ -216,9 +249,16 @@ Layer 1 wins over layer 2, which wins over the built-in defaults.
 | Scan comments for links | **off** | Much more traffic for a comparatively rare signal. |
 | Ask the OP for an update | on | The nightly staleness sweep. |
 | Days before asking for an update | 30 | Clamped to 1–365. |
-| Grace days before reporting | 7 | Clamped to 1–90. |
+| Grace days before reporting | 1 | Clamped to 1–90. |
+| Report even if the OP replied | on | Off lets a reply close the chase. |
 | Lock a stale fundraiser when reporting | **off** | Opt-in; locking is destructive. |
 | Custom reminder wording | blank | Supports `{subreddit}`, `{op}`, `{days}`, `{grace}`. |
+| Keep the verification log on the wiki | on | The permanent record. Poster history pages need it. |
+| Wiki page | `fundraiser-verifications` | Monthly pages and `users/` pages go under it. |
+| Also post each verification to Mod Discussions | **off** | A notification, not the record. |
+| Keep a wiki history page for each poster | on | See *Poster history pages*. |
+| Report posts that match another account's | on | See *Alt accounts and ban evasion*. |
+| Wording match needed on its own | 70% | Clamped to 40–100. Shared payment details count whatever this is. |
 | Minimum account age / karma | 0 (disabled) | Only ever *annotates* a modqueue report that was going to happen anyway. Never causes one. |
 
 Changing the checklist later is safe: each verification record stores the **labels** that were
@@ -247,9 +287,9 @@ Redis is the app's working store, not its system of record. An app **upgrade** k
 So every completed verification is also appended to a subreddit wiki page, on the scheduler so the
 moderator never waits for it:
 
-| Verified (IST) | Post | Fundraiser by | Verified by | Checklist | Notice |
-| --- | --- | --- | --- | --- | --- |
-| 28 Sep 2026, 16:43 IST | [t3_abc123](https://reddit.com) | u/op_user | u/mod_one | 2/3: Vet bill is in the OP name; Clinic contact was checked | Documents checked with the clinic |
+| Verified (IST) | Post | Fundraiser by | Verified by | Checklist | Notice | Mod note |
+| --- | --- | --- | --- | --- | --- | --- |
+| 28 Sep 2026, 16:43 IST | [t3_abc123](https://reddit.com) | u/op_user | u/mod_one | 2/3: Vet bill is in the OP name; Clinic contact was checked | Documents checked with the clinic | Called the clinic, bill #4471 |
 
 - The page name is a setting and may nest under an existing wiki section, e.g.
   `spotlight/fundraisers`. Pages rotate monthly (`fundraiser-verifications/2026-09`) so none approaches Reddit's size cap.
@@ -264,9 +304,11 @@ moderator never waits for it:
 - Appends are serialised behind a short Redis lock, because it is a read-modify-write.
 - A redelivered job will not write the same post twice.
 
-**The moderator's internal note is never written there.** Wiki pages are readable by anyone unless
-restricted, and notes routinely contain clinic phone numbers and case details. The note stays in the
-app record and in the mod note on the OP. There is a test asserting this.
+**The moderator's internal note is written there.** The app no longer leaves mod notes on the
+poster: the wiki is the one record that outlives an uninstall, and a verification without its note
+loses the part that says what was checked. Notes routinely contain clinic phone numbers, which is
+exactly why nothing is written until the page is proven moderator-only. Pages started before the
+note column existed are widened automatically on the next write.
 
 Optionally (off by default) each verification is also posted to **Mod Discussions**, with the full
 checklist ticked out. That is a notification, not the record - the wiki page is the record.
@@ -293,6 +335,11 @@ fields of a hash, which would force one call per record.
 | `fv:link:{linkKey}` | string | ~1y | The first post seen carrying a normalised link. Claimed with `nx`, so the first writer wins a race. |
 | `fv:plinks:{postId}` | string | ~1y | The link keys a post owns, so deleting it releases them. |
 | `fv:dup:{postId}` | string | 30d | Stops a redelivered trigger reporting the same post twice. |
+| `fv:fp:p:{postId}` | string | ~1y | Post fingerprint: author, time, **hashed** identifiers, wording signature. No text. Kept on moderator removal, erased on author deletion. |
+| `fv:fp:i:{idKey}` | zset | none | Posts carrying one hashed UPI ID / phone / bank account / link. |
+| `fv:fp:b:{bandKey}` | zset | none | Posts whose wording falls in one similarity bucket. |
+| `fv:fp:a:{username}` | zset | none | Every post fingerprinted for this person. |
+| `fv:alt:{postId}` | string | 30d | Stops a post being reported as a possible alt twice. |
 
 ## Architecture
 
@@ -399,8 +446,8 @@ against a flaired post.
 ### Author history and deletion
 
 `fv:auth:{username}` holds a post id and a timestamp per verification, and is **not** erased when a
-post is deleted. It records what the moderator team did — the same thing a mod note records, and
-Reddit keeps those too. It holds no post content: the body, notes, checklist answers and author name
+post is deleted. It records what the moderator team did — the same thing a mod log entry records,
+and Reddit keeps those too. It holds no post content: the body, notes, checklist answers and author name
 on the verification record itself are all scrubbed on deletion as before. This is what lets a
 moderator see that someone has raised here before and since removed the evidence.
 
@@ -412,7 +459,7 @@ moderator see that someone has raised here before and since removed the evidence
 3. Approve and comment **concurrently** — they are independent.
 4. Distinguish + sticky only once the comment exists (`distinguish(true)` does both in one call).
 5. Promote the record to `complete`.
-6. Mod note last, as the only genuinely optional step.
+6. Queue the wiki log entry, which then queues a rebuild of the poster's history page.
 
 Anything that fails after the comment exists produces a **partial** result and a toast naming
 exactly what needs doing by hand. A failed comment rolls the record back so the action can be re-run.
@@ -444,7 +491,6 @@ unique, so an exact repost is caught) and the modqueue report says
 | Redis transactions | 5s execution timeout (concurrency is documented inconsistently as 20 and 30) |
 | Scheduler | 10 live recurring actions per installation; `runJob()` 60 creates/min, 60 deliveries/min |
 | Moderator menu → form | must be completed within 10 minutes |
-| Mod note | 250 characters |
 | Report reason | kept under 100 characters |
 | Setting value | 2 KB |
 | Triggers | asynchronous, **at-least-once**; payload fields are optional snapshots |
@@ -457,11 +503,12 @@ npm run test:types
 npm run check
 ```
 
-224 tests across pure logic (sanitisation, dates, retry classification, settings resolution and
+302 tests across pure logic (sanitisation, dates, retry classification, settings resolution and
 clamping, checklist parsing, comment wording, URL normalisation, hashing) and the four services
 against in-memory fakes: idempotency, concurrent runs, expired and mismatched tokens, missing posts,
 deleted authors, v1→v2 record migration, every partial-failure path, duplicate races, link release
-on deletion, batching and chain limits, and the OP-reply shortcut.
+on deletion, batching and chain limits, payment-detail extraction, wording similarity, alt ranking
+and reporting, and history page building.
 
 The thin HTTP handlers in `handlers/` are not unit tested, because they import `context` from
 `@devvit/web/server`, which only exists inside the Devvit runtime. All of their logic lives in the
@@ -469,11 +516,10 @@ service layer, which is tested; the handlers are exercised during playtest.
 
 ## Not built
 
-- Repeat-fundraiser tracking (how many times one person has raised here, and when).
 - A public wiki index of verified fundraisers.
 - Outcome tracking: whether a fundraiser actually completed.
 
 ## Test counts
 
-224 unit tests across seven files. Everything below the HTTP handlers is covered; the handlers
+302 unit tests across nine files. Everything below the HTTP handlers is covered; the handlers
 themselves are exercised during playtest.

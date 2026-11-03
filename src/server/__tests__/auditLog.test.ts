@@ -7,6 +7,7 @@ import {
   countRows,
   createAuditLogService,
   modDiscussionBody,
+  upgradeAuditHeader,
 } from '../services/auditLog.js';
 import type { AppSettings } from '../settings.js';
 import type { VerificationRecord } from '../types.js';
@@ -74,12 +75,28 @@ describe('row rendering', () => {
     expect(row).toContain('Clinic contacted');
   });
 
-  it('NEVER writes the moderator note to the wiki', () => {
-    // Wiki pages are readable by anyone unless restricted, and notes routinely
-    // contain phone numbers. This is the guarantee that matters most here.
+  it('writes the moderator note, now that the wiki replaces the mod note', () => {
     const row = auditRow(record(), 'IndianPets');
-    expect(row).not.toContain('98765');
-    expect(row).not.toContain('clinic phone');
+    expect(row).toContain('clinic phone 98765 43210');
+    expect(auditPageHeader('IndianPets')).toContain('| Mod note |');
+  });
+
+  it('shows a dash rather than an empty cell when there is no note', () => {
+    expect(auditRow(record({ note: '' }), 'IndianPets').endsWith('| - |')).toBe(true);
+  });
+
+  it('widens a page started before the note column existed', () => {
+    const legacy = [
+      '# log',
+      '| Verified (IST) | Post | Fundraiser by | Verified by | Checklist | Notice |',
+      '| --- | --- | --- | --- | --- | --- |',
+      '| a | b | c | d | e | f |',
+    ].join('\n');
+    const upgraded = upgradeAuditHeader(legacy);
+    expect(upgraded).toContain('| Notice | Mod note |');
+    expect(upgraded).toContain('| --- | --- | --- | --- | --- | --- | --- |');
+    expect(upgraded).toContain('| a | b | c | d | e | f |');
+    expect(upgradeAuditHeader(upgraded)).toBe(upgraded);
   });
 
   it('escapes pipes so one row cannot break the table', () => {
@@ -173,9 +190,10 @@ describe('mod discussions', () => {
     expect(body).toContain('u/mod_one');
   });
 
-  it('omits the moderator note there too', () => {
+  it('includes the moderator note there too', () => {
     const body = modDiscussionBody(record(), 'IndianPets');
-    expect(body).not.toContain('98765');
+    expect(body).toContain('**Mod note:** clinic phone 98765 43210');
+    expect(modDiscussionBody(record({ note: '' }), 'IndianPets')).not.toContain('Mod note');
   });
 
   it('still writes the wiki row when mod discussions fail', async () => {

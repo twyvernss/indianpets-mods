@@ -12,20 +12,12 @@ import { triggers } from './handlers/triggers.js';
  * Devvit requires every platform-invoked endpoint to sit under `/internal/`.
  * The paths mounted below must match the endpoints declared in devvit.json:
  *
- *   /internal/menu/verify-fundraiser          menu.items[0]
- *   /internal/menu/verification-status        menu.items[1]
- *   /internal/menu/settings                   menu.items[2]
- *   /internal/menu/notices                    menu.items[3]
- *   /internal/form/verify-submit              forms.verifyForm
- *   /internal/form/settings-submit            forms.settingsForm
- *   /internal/form/notices-submit             forms.noticesForm
- *   /internal/triggers/automod-filter-post    triggers.onAutomoderatorFilterPost
- *   /internal/triggers/post-submit            triggers.onPostSubmit
- *   /internal/triggers/comment-create         triggers.onCommentCreate
- *   /internal/triggers/post-delete            triggers.onPostDelete
- *   /internal/jobs/stale-sweep                scheduler.tasks.stale-sweep
- *   /internal/jobs/stale-sweep-batch          scheduler.tasks.stale-sweep-batch
- *   /internal/jobs/duplicate-report           scheduler.tasks.duplicate-report
+ *   /internal/menu/*       menu.items[].endpoint      handlers/menu.ts
+ *   /internal/form/*       forms.*                    handlers/forms.ts
+ *   /internal/triggers/*   triggers.*                 handlers/triggers.ts
+ *   /internal/jobs/*       scheduler.tasks.*.endpoint handlers/scheduler.ts
+ *
+ * The full list lives in devvit.json; repeating it here only let it go stale.
  *
  * There is no `/api/` router: this app has no client, so it has no endpoints a
  * user could call directly.

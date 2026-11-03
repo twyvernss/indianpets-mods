@@ -41,7 +41,7 @@ export type VerificationRepo = {
    *
    * Kept deliberately content-free (a post id and a timestamp) and NOT erased
    * when a post is deleted: it records what the moderator team did, in the same
-   * spirit as a mod note, and is the only way to see that someone has raised
+   * spirit as a mod log entry, and is the only way to see that someone has raised
    * here before and then removed the evidence.
    */
   getAuthorHistory(username: string, limit: number): Promise<{ postId: T3; verifiedAtMs: number }[]>;

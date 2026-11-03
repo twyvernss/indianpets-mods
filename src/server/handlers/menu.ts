@@ -6,6 +6,7 @@ import {
   followUpFormResponse,
   noticesFormResponse,
   settingsFormResponse,
+  userLookupFormResponse,
   verifyFormResponse,
 } from '../formDefinitions.js';
 import { describeError } from '../lib/logger.js';
@@ -15,7 +16,6 @@ import {
   FOLLOW_UP_TOASTS,
   followUpDescription,
   heldByAutomodToast,
-  statusToast,
   SWEEP_DISABLED,
   sweepToast,
   TOASTS,
@@ -23,7 +23,7 @@ import {
   wikiCheckBlockedToast,
   wikiCheckReadyToast,
 } from '../text.js';
-import { UNEXPECTED_ERROR } from './responses.js';
+import { historyResponse, UNEXPECTED_ERROR } from './responses.js';
 
 export const menu = new Hono();
 
@@ -88,61 +88,6 @@ menu.post('/verify-fundraiser', async (c) => {
 });
 
 /**
- * "Fundraiser verification status" - read-only.
- *
- * Useful on its own, and it is also how a moderator confirms what the app
- * recorded without digging through the modlog.
- */
-menu.post('/verification-status', async (c) => {
-  const { log, verification } = getContainer();
-
-  try {
-    const { targetId } = await c.req.json<MenuItemRequest>();
-    const outcome = await verification.status(targetId);
-
-    switch (outcome.kind) {
-      case 'verified':
-        return c.json<UiResponse>({
-          showToast: {
-            text: statusToast({
-              modName: outcome.record.modName,
-              dateLabel: formatVerifiedDate(outcome.record.verifiedAtMs),
-              hasChecklist: outcome.record.checklist !== null,
-              hasNote: outcome.record.note.length > 0,
-              reminderSentAtMs: outcome.record.reminderSentAtMs,
-              opRespondedAtMs: outcome.record.opRespondedAtMs,
-              escalatedAtMs: outcome.record.escalatedAtMs,
-            }),
-            appearance: 'success',
-          },
-        });
-
-      case 'held-by-automod':
-        return c.json<UiResponse>({
-          showToast: {
-            text: heldByAutomodToast(formatVerifiedDate(outcome.heldAtMs)),
-            appearance: 'neutral',
-          },
-        });
-
-      case 'none':
-        return c.json<UiResponse>({ showToast: { text: TOASTS.noRecord, appearance: 'neutral' } });
-
-      case 'not-moderator':
-        return c.json<UiResponse>({
-          showToast: { text: TOASTS.notModerator, appearance: 'neutral' },
-        });
-
-      case 'not-a-post':
-        return c.json<UiResponse>({ showToast: { text: TOASTS.notAPost, appearance: 'neutral' } });
-    }
-  } catch (error) {
-    log.error('verification-status menu action failed', { reason: describeError(error) });
-    return c.json<UiResponse>(UNEXPECTED_ERROR);
-  }
-});
-
-/**
  * "Fundraiser tools settings" - the subreddit-level editor.
  *
  * Opens a form pre-filled with the EFFECTIVE configuration, so what a moderator
@@ -194,14 +139,17 @@ menu.post('/notices', async (c) => {
 });
 
 /**
- * "Fundraiser follow-up" - the manual entry point to the staleness chase.
+ * "Fundraiser status & follow-up" - one place to see a post's state and act.
  *
- * Opens a form showing the post's current state. Nothing is written here: the
- * action happens on submit, so a moderator who opens this and cancels has
- * changed nothing.
+ * This used to be two items, a read-only status toast and the follow-up form,
+ * which showed the same facts twice. Now: an unverified post gets the status
+ * toast (including whether AutoModerator is holding it), and a verified post
+ * opens the follow-up form, whose description says who verified it and when.
+ * Nothing is written here: the action happens on submit, so a moderator who
+ * opens this and cancels has changed nothing.
  */
 menu.post('/follow-up', async (c) => {
-  const { log, reminders, gate, tokens } = getContainer();
+  const { log, reminders, gate, tokens, verification } = getContainer();
 
   try {
     const { targetId } = await c.req.json<MenuItemRequest>();
@@ -222,10 +170,18 @@ menu.post('/follow-up', async (c) => {
     const state = await reminders.inspectFollowUp(postId);
 
     switch (state.kind) {
-      case 'no-record':
+      case 'no-record': {
+        const status = await verification.status(postId);
         return c.json<UiResponse>({
-          showToast: { text: FOLLOW_UP_TOASTS.noRecord, appearance: 'neutral' },
+          showToast: {
+            text:
+              status.kind === 'held-by-automod'
+                ? heldByAutomodToast(formatVerifiedDate(status.heldAtMs))
+                : TOASTS.noRecord,
+            appearance: 'neutral',
+          },
         });
+      }
       case 'not-verified':
         return c.json<UiResponse>({
           showToast: { text: FOLLOW_UP_TOASTS.notVerified, appearance: 'neutral' },
@@ -250,6 +206,8 @@ menu.post('/follow-up', async (c) => {
             token,
             nextStep: state.nextStep,
             description: followUpDescription({
+              verifiedBy: state.record.modName,
+              verifiedOn: formatVerifiedDate(state.record.verifiedAtMs),
               daysSinceVerified: state.daysSinceVerified,
               daysSinceReminder: state.daysSinceReminder,
               escalated: state.record.escalatedAtMs !== null,
@@ -347,6 +305,66 @@ menu.post('/run-sweep', async (c) => {
     });
   } catch (error) {
     log.error('run-sweep menu action failed', { reason: describeError(error) });
+    return c.json<UiResponse>(UNEXPECTED_ERROR);
+  }
+});
+
+/**
+ * "Poster history & matches" - on a post.
+ *
+ * Rebuilds the poster's moderator-only wiki page and opens it. The toast names
+ * the account their posts match most closely, and whether it is banned here,
+ * which answers the ban-evasion question without opening the page at all.
+ */
+menu.post('/poster-history', async (c) => {
+  const { log, gate, reddit, history } = getContainer();
+
+  try {
+    const { targetId } = await c.req.json<MenuItemRequest>();
+    const postId = asPostId(targetId);
+    if (!postId) {
+      return c.json<UiResponse>({ showToast: { text: TOASTS.notAPost, appearance: 'neutral' } });
+    }
+
+    const username = await gate.actingUsername();
+    if (!username || !(await gate.isModerator(username))) {
+      return c.json<UiResponse>({
+        showToast: { text: TOASTS.notModerator, appearance: 'neutral' },
+      });
+    }
+
+    const post = await reddit.getPost(postId);
+    if (!post?.authorName) {
+      return c.json<UiResponse>({
+        showToast: { text: "This post's author account is deleted, so it has no history.", appearance: 'neutral' },
+      });
+    }
+
+    // A post made before matching existed has no fingerprint yet; this one is
+    // taken on the spot so its matches show immediately.
+    const result = await history.rebuild(post.authorName, { ensureIndexed: postId });
+    log.info('poster history opened', { mod: username, kind: result.kind });
+    return c.json<UiResponse>(historyResponse(result, post.authorName, reddit.subredditName()));
+  } catch (error) {
+    log.error('poster-history menu action failed', { reason: describeError(error) });
+    return c.json<UiResponse>(UNEXPECTED_ERROR);
+  }
+});
+
+/** "Look up a poster's history" - subreddit menu. Opens the username form. */
+menu.post('/user-lookup', async (c) => {
+  const { log, gate } = getContainer();
+
+  try {
+    const username = await gate.actingUsername();
+    if (!username || !(await gate.isModerator(username))) {
+      return c.json<UiResponse>({
+        showToast: { text: TOASTS.notModerator, appearance: 'neutral' },
+      });
+    }
+    return c.json<UiResponse>(userLookupFormResponse());
+  } catch (error) {
+    log.error('user-lookup menu action failed', { reason: describeError(error) });
     return c.json<UiResponse>(UNEXPECTED_ERROR);
   }
 });

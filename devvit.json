@@ -27,22 +27,22 @@
         "endpoint": "/internal/menu/verify-fundraiser"
       },
       {
-        "label": "Fundraiser verification status",
-        "description": "Show who verified this fundraiser and when.",
-        "forUserType": "moderator",
-        "location": [
-          "post"
-        ],
-        "endpoint": "/internal/menu/verification-status"
-      },
-      {
-        "label": "Fundraiser follow-up",
-        "description": "Ask the OP for an update on this fundraiser, or report it to the modqueue.",
+        "label": "Fundraiser status & follow-up",
+        "description": "See who verified this fundraiser and when, then ask the OP for an update or report it to the modqueue.",
         "forUserType": "moderator",
         "location": [
           "post"
         ],
         "endpoint": "/internal/menu/follow-up"
+      },
+      {
+        "label": "Poster history & matches",
+        "description": "Open the poster’s moderator-only wiki history: every post here with links, who verified it, and which accounts they match.",
+        "forUserType": "moderator",
+        "location": [
+          "post"
+        ],
+        "endpoint": "/internal/menu/poster-history"
       },
       {
         "label": "Fundraiser tools settings",
@@ -63,6 +63,15 @@
         "endpoint": "/internal/menu/notices"
       },
       {
+        "label": "Look up a poster’s history",
+        "description": "Type a username to open their moderator-only wiki history and matching accounts.",
+        "forUserType": "moderator",
+        "location": [
+          "subreddit"
+        ],
+        "endpoint": "/internal/menu/user-lookup"
+      },
+      {
         "label": "Run the nightly check now",
         "description": "Run the stale-fundraiser check immediately instead of waiting for 3 AM.",
         "forUserType": "moderator",
@@ -72,8 +81,8 @@
         "endpoint": "/internal/menu/run-sweep"
       },
       {
-        "label": "Check the wiki log",
-        "description": "Confirm the durable verification log exists and is readable by moderators only.",
+        "label": "Open the verification log",
+        "description": "Open this month’s moderator-only verification log, after confirming it is still private.",
         "forUserType": "moderator",
         "location": [
           "subreddit"
@@ -86,7 +95,8 @@
     "verifyForm": "/internal/form/verify-submit",
     "settingsForm": "/internal/form/settings-submit",
     "noticesForm": "/internal/form/notices-submit",
-    "followUpForm": "/internal/form/follow-up-submit"
+    "followUpForm": "/internal/form/follow-up-submit",
+    "userLookupForm": "/internal/form/user-lookup-submit"
   },
   "triggers": {
     "onAutomoderatorFilterPost": "/internal/triggers/automod-filter-post",
@@ -115,6 +125,15 @@
       },
       "audit-log": {
         "endpoint": "/internal/jobs/audit-log"
+      },
+      "alt-check": {
+        "endpoint": "/internal/jobs/alt-check"
+      },
+      "alt-backfill": {
+        "endpoint": "/internal/jobs/alt-backfill"
+      },
+      "user-history": {
+        "endpoint": "/internal/jobs/user-history"
       }
     }
   },
@@ -123,11 +142,6 @@
       "enabled": {
         "type": "boolean",
         "label": "App enabled (master switch)",
-        "defaultValue": true
-      },
-      "addModNote": {
-        "type": "boolean",
-        "label": "Add a mod note on the OP when a fundraiser is verified",
         "defaultValue": true
       },
       "showVerifyingModInComment": {
@@ -174,6 +188,21 @@
         "type": "boolean",
         "label": "Also post each verification to Mod Discussions",
         "defaultValue": false
+      },
+      "userHistoryEnabled": {
+        "type": "boolean",
+        "label": "Keep a moderator-only wiki history page for each poster (every post here with links, who verified it, matching accounts)",
+        "defaultValue": true
+      },
+      "altDetectionEnabled": {
+        "type": "boolean",
+        "label": "Report posts that match another account's (same UPI ID, phone, bank account, link or wording) as possible alts / ban evasion",
+        "defaultValue": true
+      },
+      "altSimilarityPercent": {
+        "type": "number",
+        "label": "How much wording two posts must share (percent, 40-100) to count as a match by itself",
+        "defaultValue": 70
       },
       "automodReplyEnabled": {
         "type": "boolean",

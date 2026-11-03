@@ -7,7 +7,7 @@
  */
 
 /**
- * Characters that must never reach Redis, a mod note, or a log line:
+ * Characters that must never reach Redis, the wiki log, or a log line:
  * C0/C1 control codes, zero-width joiners/spaces, and the BiDi override
  * characters that can be used to make stored text render deceptively.
  *
@@ -15,7 +15,7 @@
  * control characters itself.
  */
 /**
- * Characters that must never reach Redis, a public comment, a mod note or a
+ * Characters that must never reach Redis, a public comment, the wiki log or a
  * log line: C0/C1 control codes, zero-width and directional marks, and the
  * BiDi overrides that can make stored text render deceptively.
  *
@@ -33,7 +33,7 @@ const ELLIPSIS = '…';
  * Normalises a free-text field to a single-line, bounded, control-character-free
  * string. Returns `''` for anything that is not a usable string.
  *
- * The result is only ever stored in Redis or passed to `addModNote`; it is
+ * The result is only ever stored in Redis or written to the moderator-only wiki log; it is
  * never interpolated into the public comment, so Markdown is left intact
  * rather than escaped. If that ever changes, escape at the point of rendering.
  */

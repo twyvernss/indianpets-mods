@@ -1,6 +1,7 @@
 import { redis, settings as devvitSettings } from '@devvit/web/server';
 import type { ConfigRepo } from './data/configRepo.js';
 import { createConfigRepo } from './data/configRepo.js';
+import { createFingerprintRepo } from './data/fingerprintRepo.js';
 import { createLinkRepo } from './data/linkRepo.js';
 import type { RedisPort } from './data/redisPort.js';
 import type { TokenRepo } from './data/tokenRepo.js';
@@ -9,6 +10,8 @@ import type { VerificationRepo } from './data/verificationRepo.js';
 import { createVerificationRepo } from './data/verificationRepo.js';
 import type { Logger } from './lib/logger.js';
 import { createLogger } from './lib/logger.js';
+import type { AltService } from './services/altMatch.js';
+import { createAltService } from './services/altMatch.js';
 import type { AuditLogService } from './services/auditLog.js';
 import { createAuditLogService } from './services/auditLog.js';
 import type { DuplicateService } from './services/duplicates.js';
@@ -21,6 +24,8 @@ import { createModeratorGate } from './services/moderator.js';
 import { createRedditAdapter, createSchedulerAdapter } from './services/redditAdapter.js';
 import type { ReminderService } from './services/reminders.js';
 import { createReminderService } from './services/reminders.js';
+import type { UserHistoryService } from './services/userHistory.js';
+import { createUserHistoryService } from './services/userHistory.js';
 import type { VerificationService } from './services/verification.js';
 import { createVerificationService } from './services/verification.js';
 import type { SettingsReader } from './settings.js';
@@ -51,6 +56,8 @@ export type Container = {
   reminders: ReminderService;
   intake: IntakeService;
   audit: AuditLogService;
+  alt: AltService;
+  history: UserHistoryService;
 };
 
 let instance: Container | null = null;
@@ -113,6 +120,16 @@ export function getContainer(): Container {
   });
 
   const audit = createAuditLogService({ reddit, redis: redisPort, settings, log, now });
+  const alt = createAltService({
+    fingerprints: createFingerprintRepo(redisPort),
+    links,
+    reddit,
+    scheduler,
+    settings,
+    log,
+    now,
+  });
+  const history = createUserHistoryService({ reddit, repo, alt, settings, log, now });
 
   instance = {
     log,
@@ -128,6 +145,8 @@ export function getContainer(): Container {
     reminders,
     intake,
     audit,
+    alt,
+    history,
   };
   return instance;
 }

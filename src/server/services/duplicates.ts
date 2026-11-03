@@ -239,6 +239,16 @@ export function createDuplicateService(deps: DuplicateDeps): DuplicateService {
         minimumHours: config.sameAuthorRepostHours,
       });
 
+      // A different account reusing a BANNED user's fundraiser link is the
+      // clearest ban-evasion signal there is, so it goes first in the reason.
+      if (!finding.sameAuthor && finding.originalAuthor && (await reddit.isBanned(finding.originalAuthor))) {
+        reason = buildDuplicateReportReason(finding, {
+          previouslyVerified,
+          minimumHours: config.sameAuthorRepostHours,
+          originalBanned: true,
+        });
+      }
+
       // Author thresholds only ever annotate a report that was going to happen
       // anyway. They never cause one, and they never cause a removal.
       if (finding.author && (config.minAccountAgeDays > 0 || config.minKarma > 0)) {

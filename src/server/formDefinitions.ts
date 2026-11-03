@@ -294,12 +294,6 @@ export function settingsFormResponse(
             fields: [
               {
                 type: 'boolean',
-                name: 'addModNote',
-                label: 'Add a mod note on the OP when verifying',
-                defaultValue: current.addModNote,
-              },
-              {
-                type: 'boolean',
                 name: 'showVerifyingModInComment',
                 label: 'Name the verifying moderator in the public comment',
                 helpText: 'Not recommended - this is what causes unsolicited DMs to moderators.',
@@ -375,6 +369,64 @@ export function settingsFormResponse(
                 label: 'Also scan comments for fundraiser links',
                 helpText: 'Off by default. Much more traffic for a comparatively rare signal.',
                 defaultValue: current.scanCommentsForLinks,
+              },
+            ],
+          },
+          {
+            type: 'group',
+            label: 'Wiki log (the permanent record)',
+            fields: [
+              {
+                type: 'boolean',
+                name: 'wikiLogEnabled',
+                label: 'Keep the verification log on the wiki',
+                helpText:
+                  'One row per verification: who verified it, when, the checklist and the mod note. Moderator-only, and it survives the app being removed. Poster history pages need this on.',
+                defaultValue: current.wikiLogEnabled,
+              },
+              {
+                type: 'string',
+                name: 'wikiLogPage',
+                label: 'Wiki page',
+                helpText:
+                  'Monthly pages go under it, and poster history pages under its users/ subpage.',
+                defaultValue: current.wikiLogPage,
+              },
+              {
+                type: 'boolean',
+                name: 'modmailLogEnabled',
+                label: 'Also post each verification to Mod Discussions',
+                helpText: 'Off by default. Useful if your team lives in modmail.',
+                defaultValue: current.modmailLogEnabled,
+              },
+            ],
+          },
+          {
+            type: 'group',
+            label: 'Alt accounts and ban evasion',
+            fields: [
+              {
+                type: 'boolean',
+                name: 'altDetectionEnabled',
+                label: "Report posts that match another account's",
+                helpText:
+                  'Compares each new post with every other account: same UPI ID, phone number, bank account, fundraiser link, or mostly the same wording. Says whether the matched account is banned here.',
+                defaultValue: current.altDetectionEnabled,
+              },
+              {
+                type: 'number',
+                name: 'altSimilarityPercent',
+                label: 'Wording match needed on its own (percent)',
+                helpText: `Between ${CONFIG.alt.minSimilarityPercent} and ${CONFIG.alt.maxSimilarityPercent}. Shared payment details always count, whatever this is set to.`,
+                defaultValue: current.altSimilarityPercent,
+              },
+              {
+                type: 'boolean',
+                name: 'userHistoryEnabled',
+                label: 'Keep a wiki history page for each poster',
+                helpText:
+                  'Moderator-only. Every post they made here with links, who verified each one, and which accounts they match.',
+                defaultValue: current.userHistoryEnabled,
               },
             ],
           },
@@ -495,6 +547,34 @@ export function followUpFormResponse(input: {
         ],
       },
       data: { token: input.token },
+    },
+  };
+}
+
+/** Field name on the "Look up a poster" form. */
+export const LOOKUP_FIELD = 'username';
+
+/** Asks which poster's history page to build. */
+export function userLookupFormResponse(): UiResponse {
+  return {
+    showForm: {
+      name: 'userLookupForm',
+      form: {
+        title: "Look up a poster's history",
+        description:
+          'Builds their moderator-only wiki page: every post they made here with links, who verified each one, and which other accounts their posts match. Takes a few seconds.',
+        acceptLabel: 'Open history',
+        cancelLabel: 'Cancel',
+        fields: [
+          {
+            type: 'string',
+            name: LOOKUP_FIELD,
+            label: 'Username',
+            helpText: 'With or without the u/.',
+            required: true,
+          },
+        ],
+      },
     },
   };
 }

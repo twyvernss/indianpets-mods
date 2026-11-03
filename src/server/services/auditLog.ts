@@ -20,11 +20,12 @@ import type { RedditPort } from './redditPort.js';
  *  - the wiki keeps its own revision history, so a bad write is recoverable;
  *  - moderators can read and search it without any tooling.
  *
- * WHAT IS DELIBERATELY NOT WRITTEN: the moderator's internal note. Wiki pages
- * are readable by anyone unless restricted, notes routinely contain clinic
- * phone numbers and case details, and one misconfigured permission would
- * publish them. The note stays in Redis and in the mod note. New pages are
- * created MODS_ONLY and unlisted as a second line of defence.
+ * The moderator's internal note IS written here. The wiki is the app's only
+ * record that outlives an uninstall (the app no longer leaves mod notes), and a
+ * verification without its note loses the part that says what was checked.
+ * Notes routinely contain clinic phone numbers and case details, so nothing is
+ * written until the page is PROVEN moderator-only - read back from Reddit on
+ * every write - and pages are created MODS_ONLY and unlisted.
  */
 export type AuditLogService = {
   /** Appends one verification. Called from a scheduled job, never inline. */
@@ -63,7 +64,7 @@ export function auditPageName(basePage: string, epochMs: number): string {
 }
 
 /** Markdown table cells cannot contain a raw pipe or newline. */
-function cell(value: string): string {
+export function cell(value: string): string {
   return value.replace(/\|/gu, '\\|').replace(/[\r\n]+/gu, ' ').trim();
 }
 
@@ -84,15 +85,37 @@ export function auditPageHeader(subredditName: string): string {
     `# Fundraiser verification log - r/${subredditName}`,
     '',
     'Written automatically by the mod team bot, one row per verified fundraiser.',
-    'Moderator notes are deliberately not included here.',
+    'Per-user history pages live under the users/ subpage.',
     '',
     'This page is restricted to moderators. If you can read it without being a',
     'moderator of this community, please tell the mod team: the bot refuses to',
     'write to it unless it can confirm the restriction, so something is wrong.',
     '',
-    '| Verified (IST) | Post | Fundraiser by | Verified by | Checklist | Notice |',
-    '| --- | --- | --- | --- | --- | --- |',
+    AUDIT_TABLE_HEADER,
+    AUDIT_TABLE_RULE,
   ].join('\n');
+}
+
+const AUDIT_TABLE_HEADER =
+  '| Verified (IST) | Post | Fundraiser by | Verified by | Checklist | Notice | Mod note |';
+const AUDIT_TABLE_RULE = '| --- | --- | --- | --- | --- | --- | --- |';
+
+/** The six-column header that pages written before the note column carry. */
+const LEGACY_TABLE_HEADER = [
+  '| Verified (IST) | Post | Fundraiser by | Verified by | Checklist | Notice |',
+  '| --- | --- | --- | --- | --- | --- |',
+].join('\n');
+
+/**
+ * Widens a page started before the note column existed.
+ *
+ * Markdown drops cells beyond the header's width, so without this a note added
+ * mid-month would be written but invisible until next month's page.
+ */
+export function upgradeAuditHeader(content: string): string {
+  return content.includes(LEGACY_TABLE_HEADER)
+    ? content.replace(LEGACY_TABLE_HEADER, `${AUDIT_TABLE_HEADER}\n${AUDIT_TABLE_RULE}`)
+    : content;
 }
 
 export function auditRow(record: VerificationRecord, subredditName: string): string {
@@ -110,6 +133,7 @@ export function auditRow(record: VerificationRecord, subredditName: string): str
     cell(`u/${record.modName}`),
     cell(checklistCell(record)),
     cell(record.templateLabel ?? 'default'),
+    cell(record.note.length > 0 ? record.note : '-'),
   ];
   return `| ${cells.join(' | ')} |`;
 }
@@ -166,7 +190,9 @@ export function createAuditLogService(deps: AuditLogDeps): AuditLogService {
       }
 
       const content =
-        existing === null ? `${auditPageHeader(subredditName)}\n${row}` : `${existing}\n${row}`;
+        existing === null
+          ? `${auditPageHeader(subredditName)}\n${row}`
+          : `${upgradeAuditHeader(existing)}\n${row}`;
       await reddit.writeWikiPage(page, content, `Verified ${record.postId}`);
     });
 
@@ -293,7 +319,6 @@ export function modDiscussionBody(record: VerificationRecord, subredditName: str
     lines.push('- Checklist: not used');
   }
 
-  // The internal note is intentionally absent; see the note at the top of this
-  // module. It stays in the app record and the mod note on the OP.
+  if (record.note.length > 0) lines.push('', `**Mod note:** ${record.note}`);
   return lines.join('\n');
 }

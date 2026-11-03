@@ -120,7 +120,6 @@ describe('begin', () => {
     expect(outcome.kind).toBe('ready');
     expect(h.reddit.calls).not.toContain('approve');
     expect(h.reddit.calls).not.toContain('comment');
-    expect(h.reddit.calls).not.toContain('modNote');
   });
 
   it('builds the moderator context line from the author and the automod hold', async () => {
@@ -187,7 +186,7 @@ describe('complete - happy path', () => {
     expect(outcome.kind).toBe('ok');
     // approve and comment are issued together; distinguish must come after the
     // comment exists, so it is always last.
-    expect(h.reddit.calls).toEqual(['getPost', 'approve', 'comment', 'distinguish', 'modNote']);
+    expect(h.reddit.calls).toEqual(['getPost', 'approve', 'comment', 'distinguish']);
   });
 
   it('stores a complete record and indexes it in both sorted sets', async () => {
@@ -225,16 +224,6 @@ describe('complete - happy path', () => {
     expect(h.reddit.lastCommentText).toContain('not a guarantee');
   });
 
-  it('never exceeds the 250 character mod note limit', async () => {
-    await h.service.complete({
-      token: await tokenFor(h),
-      contextPostId: null,
-      note: 'x'.repeat(CONFIG.noteMaxLength),
-      checklistAnswers: null,
-      templateId: null,
-    });
-    expect(h.reddit.lastModNote?.note.length ?? 0).toBeLessThanOrEqual(CONFIG.modNoteMaxLength);
-  });
 });
 
 describe('checklist', () => {
@@ -291,7 +280,6 @@ describe('checklist', () => {
       { label: 'Bill matches', checked: false },
       { label: 'Clinic called', checked: true },
     ]);
-    expect(h.reddit.lastModNote?.note).toContain('Checklist 1/2.');
   });
 
   it('treats an untouched checklist as the quick path', async () => {
@@ -600,22 +588,8 @@ describe('complete - failure handling', () => {
     expect((await h.repo.get(POST_ID))?.status).toBe('complete');
   });
 
-  it('surfaces a failed mod note instead of swallowing it', async () => {
-    const h = harness({ failOn: { modNote: new Error('USER_DOESNT_EXIST') } });
 
-    const outcome = await h.service.complete({
-      token: await tokenFor(h),
-      contextPostId: null,
-      note: '',
-      checklistAnswers: null,
-      templateId: null,
-    });
-
-    expect(outcome.kind).toBe('partial');
-    if (outcome.kind === 'partial') expect(outcome.detail).toContain('mod note');
-  });
-
-  it('skips the mod note entirely when the author account is deleted', async () => {
+  it('verifies a post whose author account is deleted', async () => {
     const h = harness({
       post: { id: POST_ID, authorName: null, isApproved: false, isRemoved: true, flairText: null },
     });
@@ -629,21 +603,9 @@ describe('complete - failure handling', () => {
     });
 
     expect(outcome.kind).toBe('ok');
-    expect(h.reddit.calls).not.toContain('modNote');
     expect((await h.repo.get(POST_ID))?.authorName).toBeNull();
   });
 
-  it('honours the setting that disables mod notes', async () => {
-    const h = harness({}, { addModNote: false });
-    await h.service.complete({
-      token: await tokenFor(h),
-      contextPostId: null,
-      note: '',
-      checklistAnswers: null,
-      templateId: null,
-    });
-    expect(h.reddit.calls).not.toContain('modNote');
-  });
 });
 
 describe('status', () => {

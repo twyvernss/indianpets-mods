@@ -21,7 +21,6 @@ import {
   TEMPLATE_SEPARATOR,
 } from '../settings.js';
 import {
-  buildModNote,
   buildReminderComment,
   buildVerificationComment,
   DEFAULT_INTAKE_TEMPLATE,
@@ -151,8 +150,8 @@ describe('withRetry', () => {
 
 describe('settings', () => {
   it('falls back to defaults for missing or wrongly typed values', () => {
-    const wrongTypes = parseSettings({ addModNote: 'yes', customNoticeText: 7, reminderDays: {} });
-    expect(wrongTypes.addModNote).toBe(DEFAULT_SETTINGS.addModNote);
+    const wrongTypes = parseSettings({ compactChecklist: 'yes', customNoticeText: 7, reminderDays: {} });
+    expect(wrongTypes.compactChecklist).toBe(DEFAULT_SETTINGS.compactChecklist);
     expect(wrongTypes.customNoticeText).toBe(DEFAULT_SETTINGS.customNoticeText);
     expect(wrongTypes.reminderDays).toBe(DEFAULT_SETTINGS.reminderDays);
     expect(parseSettings({ showVerifyingModInComment: true }).showVerifyingModInComment).toBe(true);
@@ -177,7 +176,7 @@ describe('settings', () => {
 
   it('caches reads for the configured window and refreshes after it', async () => {
     let clock = 0;
-    const getAll = vi.fn(async () => ({ addModNote: false }));
+    const getAll = vi.fn(async () => ({ compactChecklist: false }));
     const reader = createSettingsReader({ getAll }, new FakeConfigRepo(), () => clock, 1000);
 
     await reader.get();
@@ -241,36 +240,6 @@ describe('public comment wording', () => {
       customText: 'Checked by {mod} in r/{subreddit} on {date}.',
     });
     expect(comment).toBe('Checked by the moderator team in r/IndianPets on 28 Sep 2026, 14:05 IST.');
-  });
-});
-
-describe('buildModNote', () => {
-  it('leads with who and when so truncation never loses the essentials', () => {
-    const note = buildModNote({
-      modName: 'mod_one',
-      dateLabel: '28 Sep 2026, 14:05 IST',
-      checklist: null,
-      note: 'x'.repeat(400),
-    });
-    expect(note.startsWith('Fundraiser verified by u/mod_one on 28 Sep 2026, 14:05 IST.')).toBe(true);
-    expect(note.slice(0, CONFIG.modNoteMaxLength)).toContain('mod_one');
-  });
-
-  it('summarises the checklist as a ratio', () => {
-    const note = buildModNote({
-      modName: 'mod_one',
-      dateLabel: 'today',
-      checklist: [
-        { label: 'a', checked: true },
-        { label: 'b', checked: true },
-        { label: 'c', checked: false },
-        { label: 'd', checked: true },
-        { label: 'e', checked: false },
-        { label: 'f', checked: false },
-      ],
-      note: '',
-    });
-    expect(note).toContain('Checklist 3/6.');
   });
 });
 
@@ -601,6 +570,8 @@ describe('every bot message is an editable template', () => {
 
 describe('followUpDescription', () => {
   const base = {
+    verifiedBy: 'mod_one',
+    verifiedOn: '24 Sep 2026, 10:00 IST',
     daysSinceVerified: 40,
     daysSinceReminder: null as number | null,
     escalated: false,
@@ -610,6 +581,12 @@ describe('followUpDescription', () => {
     remindersEnabled: true,
     lockStalePosts: false,
   };
+
+  it('leads with who verified the post and when, now that it replaces the status action', () => {
+    expect(followUpDescription(base).startsWith('Verified by u/mod_one on 24 Sep 2026, 10:00 IST (40 days ago).')).toBe(
+      true,
+    );
+  });
 
   it('is explicit that reporting does not lock when the setting is off', () => {
     const text = followUpDescription(base);

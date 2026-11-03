@@ -38,7 +38,7 @@ import { KEY_PREFIX } from '../config.js';
  *                                Every fundraiser this app has verified for
  *                                this person. SURVIVES post deletion on
  *                                purpose: it is a log of moderator actions,
- *                                like a mod note, and holds no post content -
+ *                                like a mod log entry, and holds no post content -
  *                                only an id and a timestamp.
  *
  * DUPLICATE LINK DETECTION
@@ -51,6 +51,27 @@ import { KEY_PREFIX } from '../config.js';
  *
  *   fv:dup:{postId}      STRING  "1", TTL 30d. Stops a redelivered trigger
  *                                reporting the same post twice.
+ *
+ * ALT-ACCOUNT MATCHING
+ *   fv:fp:p:{postId}     STRING  JSON StoredFingerprint - author, time, HASHED
+ *                                identifiers and a wording signature. No post
+ *                                text. TTL ~1 year. Erased when the AUTHOR
+ *                                deletes the post; kept when a moderator
+ *                                removes it, because a banned user's removed
+ *                                posts are exactly what an alt is matched to.
+ *
+ *   fv:fp:i:{idKey}      ZSET    member = postId, score = postedAtMs. Every post
+ *                                carrying this hashed UPI ID / phone / bank
+ *                                account / link.
+ *
+ *   fv:fp:b:{bandKey}    ZSET    member = postId, score = postedAtMs. Posts whose
+ *                                wording falls in this similarity bucket.
+ *
+ *   fv:fp:a:{username}   ZSET    member = postId, score = postedAtMs. Every post
+ *                                fingerprinted for this person.
+ *
+ *   fv:alt:{postId}      STRING  "1", TTL 30d. Stops a post being reported as a
+ *                                possible alt twice.
  *
  * Everything is namespaced under `fv:` so a future feature can add keys
  * without colliding, and so a bulk cleanup can be reasoned about.
@@ -70,4 +91,10 @@ export const keys = {
   link: (linkKey: string): string => `${KEY_PREFIX}:link:${linkKey}`,
   postLinks: (postId: T3): string => `${KEY_PREFIX}:plinks:${postId}`,
   duplicateReported: (postId: T3): string => `${KEY_PREFIX}:dup:${postId}`,
+
+  fingerprint: (postId: T3): string => `${KEY_PREFIX}:fp:p:${postId}`,
+  fingerprintId: (idKey: string): string => `${KEY_PREFIX}:fp:i:${idKey}`,
+  fingerprintBand: (bandKey: string): string => `${KEY_PREFIX}:fp:b:${bandKey}`,
+  fingerprintAuthor: (username: string): string => `${KEY_PREFIX}:fp:a:${username.toLowerCase()}`,
+  altReported: (postId: T3): string => `${KEY_PREFIX}:alt:${postId}`,
 } as const;

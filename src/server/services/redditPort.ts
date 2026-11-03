@@ -50,10 +50,23 @@ export type CommentHandle = {
  */
 export type WikiPrivacy = { ok: true } | { ok: false; reason: string };
 
-export type ModNoteInput = {
-  username: string;
-  postId: T3;
-  note: string;
+/** What alt matching reads from a post: its text, never stored as such. */
+export type PostContent = {
+  id: T3;
+  authorName: string | null;
+  title: string;
+  body: string;
+  url: string;
+  createdAtMs: number;
+};
+
+/** One of a person's posts in this subreddit, for their history page. */
+export type UserPostSummary = {
+  id: T3;
+  createdAtMs: number;
+  flairText: string | null;
+  /** Removed by a moderator or by Reddit. */
+  removed: boolean;
 };
 
 export type RedditPort = {
@@ -66,7 +79,6 @@ export type RedditPort = {
   getPost(postId: T3): Promise<PostSnapshot | null>;
   approvePost(postId: T3): Promise<void>;
   submitAppComment(postId: T3, text: string): Promise<CommentHandle>;
-  addModNote(input: ModNoteInput): Promise<void>;
 
   /* --- v2 --- */
 
@@ -106,6 +118,24 @@ export type RedditPort = {
   writeWikiPage(page: string, content: string, reason: string): Promise<void>;
   /** Posts to Mod Discussions. Does not involve or notify any user. */
   sendModDiscussion(subject: string, bodyMarkdown: string): Promise<void>;
+
+  /* --- user history and alt matching --- */
+
+  /** True if this person is currently banned here. False when it cannot be read. */
+  isBanned(username: string): Promise<boolean>;
+  /** Title, body and link of one post. Null when it cannot be read. */
+  getPostContent(postId: T3): Promise<PostContent | null>;
+  /**
+   * This person's posts in THIS subreddit, newest first, read from their
+   * profile. `scanLimit` bounds how far back their whole posting history is
+   * read; posts elsewhere are skipped. Empty when the account is gone.
+   */
+  getUserPostsHere(username: string, scanLimit: number): Promise<UserPostSummary[]>;
+  /**
+   * One page of this subreddit's newest posts, for the fingerprint backfill.
+   * `after` is the id of the last post of the previous page.
+   */
+  listNewPosts(after: T3 | null, limit: number): Promise<PostContent[]>;
 };
 
 /** The slice of Devvit's scheduler this app uses. */
