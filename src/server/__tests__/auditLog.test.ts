@@ -69,67 +69,104 @@ describe('page naming', () => {
 });
 
 describe('row rendering', () => {
-  it('links the post and shows the checklist as a count with what was missed', () => {
+  it('is one table row with the post linked and the checklist as a count only', () => {
     const row = auditRow(record(), 'IndianPets');
-    expect(row).toContain('[open post](https://www.reddit.com/r/IndianPets/comments/abc123/)');
-    expect(row).toContain('u/op_user · verified by u/mod_one');
-    expect(row).toContain('- Checklist 2/3 · missing: Photo with username');
-  });
-
-  it('shows a fully ticked checklist as just the count', () => {
-    const all = record({ checklist: [{ label: 'a', checked: true }, { label: 'b', checked: true }] });
-    expect(auditRow(all, 'IndianPets')).toContain('- Checklist 2/2 ✓');
-  });
-
-  it('is a short stack of lines a phone can show, never a wide table row', () => {
-    const row = auditRow(record(), 'IndianPets');
-    expect(row).not.toContain('|');
-    for (const line of row.split('\n')) expect(line.length).toBeLessThan(140);
+    expect(row.startsWith('| ')).toBe(true);
+    expect(row).toContain('[t3_abc123](https://www.reddit.com/r/IndianPets/comments/abc123/)');
+    expect(row).toContain('| u/op_user | u/mod_one | 2/3 |');
+    expect(row).not.toContain('Clinic contacted');
   });
 
   it('writes the moderator note, now that the wiki replaces the mod note', () => {
-    expect(auditRow(record(), 'IndianPets')).toContain('- Note: clinic phone 98765 43210');
+    expect(auditRow(record(), 'IndianPets')).toContain('| clinic phone 98765 43210 |');
   });
 
-  it('leaves out an empty note line, and starts the post as up', () => {
-    const row = auditRow(record({ note: '' }), 'IndianPets');
-    expect(row).not.toContain('Note:');
-    expect(row.endsWith('- Status: up')).toBe(true);
+  it('shows a dash for no note, and starts the post as up', () => {
+    expect(auditRow(record({ note: '' }), 'IndianPets').endsWith('| - | up |')).toBe(true);
   });
 
-  it('turns old table rows into short entries, keeping only the checklist count', () => {
+  it('escapes pipes and newlines so one row cannot break the table', () => {
+    const row = auditRow(record({ note: 'bill | receipt\nseen' }), 'IndianPets');
+    expect(row).toContain('bill \\| receipt seen');
+    expect(row).not.toContain('\n');
+  });
+
+  it('handles a deleted author and a picked notice', () => {
+    const row = auditRow(record({ authorName: null, templateLabel: 'Registered rescue' }), 'IndianPets');
+    expect(row).toContain('[deleted]');
+    expect(row).toContain('Registered rescue');
+  });
+
+  it('says so plainly when no checklist was used', () => {
+    expect(auditRow(record({ checklist: null }), 'IndianPets')).toContain('| not used |');
+  });
+});
+
+describe('bringing old pages up to date', () => {
+  const HEADER = '| Verified | Post | By | Verified by | Checklist | Notice | Note | Status |';
+
+  it('shortens the long checklist cells of old table rows to the count', () => {
     const legacy = [
       '# log',
       'Written automatically by the mod team bot, one row per verified fundraiser.',
       'Moderator notes are deliberately not included here.',
       '| Verified (IST) | Post | Fundraiser by | Verified by | Checklist | Notice | Mod note | Status |',
       '| --- | --- | --- | --- | --- | --- | --- | --- |',
-      '| 28 Sep 2026, 16:43 IST | [t3_abc](https://www.reddit.com/r/x/comments/abc/) | u/op | u/mod | 3/6: Vet bill; Clinic; Photo | default | hello | removed, 3 Nov 2026 |',
+      '| 28 Sep 2026, 16:43 IST | [t3_abc](https://r/abc/) | u/op | u/mod | 3/6: Vet bill; Clinic; Photo | default | hello | removed |',
     ].join('\n');
 
     const upgraded = upgradeAuditHeader(legacy);
-    expect(upgraded).not.toContain('|');
     expect(upgraded).not.toContain('deliberately not included');
-    expect(upgraded).toContain('**28 Sep 2026, 16:43 IST** · [open post](https://www.reddit.com/r/x/comments/abc/) `t3_abc`');
-    expect(upgraded).toContain('- u/op · verified by u/mod');
-    expect(upgraded).toContain('- Checklist 3/6');
+    expect(upgraded).toContain(HEADER);
+    expect(upgraded).toContain('| 28 Sep 2026, 16:43 IST | [t3_abc](https://r/abc/) | u/op | u/mod | 3/6 | default | hello | removed |');
     expect(upgraded).not.toContain('Vet bill');
-    expect(upgraded).toContain('- Note: hello');
-    expect(upgraded).toContain('- Status: removed, 3 Nov 2026');
     expect(upgradeAuditHeader(upgraded)).toBe(upgraded);
   });
 
-  it('converts the oldest six-column rows too, leaving their status empty to be filled in', () => {
+  it('turns the short-lived list entries back into table rows', () => {
+    const listPage = [
+      '# Fundraiser verifications - r/IndianPets',
+      '',
+      'Moderators only.',
+      '',
+      '---',
+      '',
+      '**3 Nov 2026, 16:31 IST** · [open post](https://r/q14t/) `t3_1xmq14t`',
+      '- u/Intelligent_Row_790 · verified by u/Thewyverns',
+      '- Checklist 2/6 · missing: Vet bill; Photo',
+      '- Note: this is test',
+      '- Status: up',
+    ].join('\n');
+
+    const upgraded = upgradeAuditHeader(listPage);
+    expect(upgraded).toContain(HEADER);
+    expect(upgraded).toContain(
+      '| 3 Nov 2026, 16:31 IST | [t3_1xmq14t](https://r/q14t/) | u/Intelligent_Row_790 | u/Thewyverns | 2/6 | default | this is test | up |',
+    );
+    expect(upgraded).not.toContain('missing');
+    expect(upgraded).not.toContain('\n---\n');
+    expect(upgradeAuditHeader(upgraded)).toBe(upgraded);
+  });
+
+  it('pads the oldest six-column rows, leaving their status empty to be filled in', () => {
     const legacy = [
       '| Verified (IST) | Post | Fundraiser by | Verified by | Checklist | Notice |',
       '| --- | --- | --- | --- | --- | --- |',
       '| 1 Sep 2026, 10:00 IST | [t3_old](https://r/old/) | [deleted] | u/mod | not used | default |',
     ].join('\n');
     const upgraded = upgradeAuditHeader(legacy);
-    expect(upgraded).toContain('- Checklist not used');
-    expect(withStatus(upgraded, 't3_old', 'up', true)).toContain('- Status: up');
+    expect(upgraded).toContain('| 1 Sep 2026, 10:00 IST | [t3_old](https://r/old/) | [deleted] | u/mod | not used | default | - |  |');
+    expect(withStatus(upgraded, 't3_old', 'up', true)).toContain('| - | up |');
   });
 
+  it('keeps a new page that has no rows yet as a header and an empty table', () => {
+    const page = upgradeAuditHeader(auditPageHeader('IndianPets'));
+    expect(page).toContain(HEADER);
+    expect(upgradeAuditHeader(page)).toBe(page);
+  });
+});
+
+describe('status updates', () => {
   it('sets the status of one row and leaves the others alone', () => {
     const page = [
       auditPageHeader('IndianPets'),
@@ -137,39 +174,21 @@ describe('row rendering', () => {
       auditRow(record({ postId: 't3_two' as T3 }), 'IndianPets'),
     ].join('\n');
 
-    const updated = withStatus(page, 't3_one', 'removed, 3 Nov 2026') ?? '';
-    const entries = updated.split('`t3_two`');
-    expect(entries[0]).toContain('- Status: removed, 3 Nov 2026');
-    expect(entries[1]).toContain('- Status: up');
-    expect(entries[1]).not.toContain('removed');
+    const lines = (withStatus(page, 't3_one', 'removed, 3 Nov 2026') ?? '').split('\n');
+    expect(lines.find((line) => line.includes('t3_one'))?.endsWith('| removed, 3 Nov 2026 |')).toBe(true);
+    expect(lines.find((line) => line.includes('t3_two'))?.endsWith('| up |')).toBe(true);
   });
 
-  it('still updates a row in a table-format page from before the list format', () => {
-    const row = '| a | [t3_old](link) | c | d | e | f | g | up |';
-    expect(withStatus(row, 't3_old', 'removed')).toBe('| a | [t3_old](link) | c | d | e | f | g | removed |');
-  });
-
-  it('pads an old six-cell row so the status lands under Status', () => {
-    const row = '| a | [t3_old](link) | c | d | e | f |';
-    const updated = withStatus(row, 't3_old', 'up') ?? '';
-    expect(updated).toBe('| a | [t3_old](link) | c | d | e | f | - | up |');
-  });
-
-  it('keeps escaped pipes inside a cell of a table-format row', () => {
-    const row = '| a | [t3_abc123](l) | c | d | e | f | bill \\| receipt | up |';
+  it('keeps escaped pipes inside a cell', () => {
+    const row = auditRow(record({ note: 'bill | receipt' }), 'IndianPets');
     expect(withStatus(row, 't3_abc123', 'removed')).toContain('bill \\| receipt | removed |');
   });
 
   it('only fills a missing status when asked to', () => {
     const row = auditRow(record(), 'IndianPets');
     expect(withStatus(row, 't3_abc123', 'removed', true)).toBeNull();
-    expect(withStatus(row.replace('- Status: up', '- Status: '), 't3_abc123', 'removed', true)).toContain(
-      '- Status: removed',
-    );
     const old = '| a | [t3_abc123](l) | c | d | e | f | g |';
-    expect(withStatus(old, 't3_abc123', 'removed', true)).toBe(
-      '| a | [t3_abc123](l) | c | d | e | f | g | removed |',
-    );
+    expect(withStatus(old, 't3_abc123', 'removed', true)).toBe('| a | [t3_abc123](l) | c | d | e | f | g | removed |');
   });
 
   it('returns null for a post that is not on the page', () => {
@@ -182,21 +201,6 @@ describe('row rendering', () => {
     expect(statusFromState('deleted')).toBe('deleted by author');
     expect(statusFromState('unknown')).toBeNull();
   });
-
-  it('keeps a note on one line, so one entry cannot break the next', () => {
-    const row = auditRow(record({ note: 'line one\nline two' }), 'IndianPets');
-    expect(row).toContain('- Note: line one line two');
-  });
-
-  it('handles a deleted author and a picked notice', () => {
-    const row = auditRow(record({ authorName: null, templateLabel: 'Registered rescue' }), 'IndianPets');
-    expect(row).toContain('[deleted]');
-    expect(row).toContain('Registered rescue');
-  });
-
-  it('says so plainly when no checklist was used', () => {
-    expect(auditRow(record({ checklist: null }), 'IndianPets')).toContain('not used');
-  });
 });
 
 describe('writing the log', () => {
@@ -207,6 +211,7 @@ describe('writing the log', () => {
     const page = h.reddit.wiki.get(PAGE);
     expect(page).toBeDefined();
     expect(page).toContain('Fundraiser verifications');
+    expect(page).toContain('| --- |');
     expect(page).toContain('t3_abc123');
   });
 
@@ -262,7 +267,7 @@ describe('setStatus', () => {
       status: 'removed, 28 Sep 2026',
     });
     expect(done).toBe(true);
-    expect(h.reddit.wiki.get(PAGE)).toContain('- Status: removed, 28 Sep 2026');
+    expect(h.reddit.wiki.get(PAGE)).toContain('| removed, 28 Sep 2026 |');
   });
 
   it('writes nothing for a post that was never logged', async () => {
@@ -405,7 +410,7 @@ describe('wiki privacy', () => {
     await h.service.record(record());
 
     const page = h.reddit.wiki.get(PAGE) ?? '';
-    const header = page.split('`t3_abc123`')[0] ?? '';
+    const header = page.split('| Verified |')[0] ?? '';
     expect(header).not.toContain('u/op_user');
     expect(header).not.toContain('u/mod_one');
     expect(header).toContain('Moderators only');

@@ -118,16 +118,13 @@ export function cell(value: string): string {
 }
 
 /**
- * The checklist in a few characters: "6/6 ✓", or the count and what was NOT
- * ticked - the part a moderator reading the log on a phone actually needs.
+ * The checklist as a count - "5/6" - or "not used". Naming each ticked item
+ * is what made the old rows tall; the count is what a moderator scans for.
  */
 export function checklistSummary(record: VerificationRecord): string {
   if (!record.checklist || record.checklist.length === 0) return 'not used';
-
-  const total = record.checklist.length;
-  const missing = record.checklist.filter((item) => !item.checked);
-  if (missing.length === 0) return `${total}/${total} ✓`;
-  return `${total - missing.length}/${total} · missing: ${missing.map((item) => item.label).join('; ')}`;
+  const ticked = record.checklist.filter((item) => item.checked).length;
+  return `${ticked}/${record.checklist.length}`;
 }
 
 /** The header a freshly created monthly page starts with. */
@@ -138,7 +135,8 @@ export function auditPageHeader(subredditName: string, basePage?: string): strin
     ...(basePage ? [`[All months and poster pages](${wikiPageUrl(subredditName, basePage)})`, ''] : []),
     'Moderators only. If you can read this and are not a moderator here, tell the mod team.',
     '',
-    '---',
+    AUDIT_TABLE_HEADER,
+    AUDIT_TABLE_RULE,
   ].join('\n');
 }
 
@@ -169,74 +167,90 @@ export function hubPageContent(subredditName: string, basePage: string, monthPag
   ].join('\n');
 }
 
-const AUDIT_TABLE_HEADER =
-  '| Verified (IST) | Post | Fundraiser by | Verified by | Checklist | Notice | Mod note | Status |';
+/** Short column names, so the table fits a phone as well as it can. */
+const AUDIT_TABLE_HEADER = '| Verified | Post | By | Verified by | Checklist | Notice | Note | Status |';
 const AUDIT_TABLE_RULE = '| --- | --- | --- | --- | --- | --- | --- | --- |';
 /** Cells per row. Status is last so rows written before it existed stay aligned. */
 const AUDIT_COLUMNS = 8;
 
-/** Headers that pages started by earlier versions carry, oldest first. */
-const LEGACY_TABLE_HEADERS = [
-  [
-    '| Verified (IST) | Post | Fundraiser by | Verified by | Checklist | Notice |',
-    '| --- | --- | --- | --- | --- | --- |',
-  ].join('\n'),
-  [
-    '| Verified (IST) | Post | Fundraiser by | Verified by | Checklist | Notice | Mod note |',
-    '| --- | --- | --- | --- | --- | --- | --- |',
-  ].join('\n'),
-];
-
 /** A line early pages carried, no longer true now that notes are logged. */
 const LEGACY_NOTE_LINE = 'Moderator notes are deliberately not included here.';
 
-/**
- * Widens a page started before the note or status columns existed.
- *
- * Markdown drops cells beyond the header's width, so without this a cell added
- * mid-month would be written but invisible until next month's page.
- */
-export function upgradeAuditHeader(content: string): string {
-  let upgraded = content.replace(`${LEGACY_NOTE_LINE}\n`, '').replace(LEGACY_NOTE_LINE, '');
-  for (const legacy of LEGACY_TABLE_HEADERS) {
-    if (upgraded.includes(legacy)) {
-      upgraded = upgraded.replace(legacy, `${AUDIT_TABLE_HEADER}\n${AUDIT_TABLE_RULE}`);
-    }
-  }
-  return tableRowsToEntries(upgraded);
+const TABLE_RULE = /^\|(?:\s*---\s*\|)+\s*$/u;
+const POST_CELL = /^\[(t3_[a-z0-9]+)\]\(([^)]+)\)$/u;
+/** The heading of an entry in the short-lived list format. */
+const LIST_ENTRY = /^\*\*(.+?)\*\* · \[open post\]\(([^)]+)\) `(t3_[a-z0-9]+)`$/u;
+
+/** A checklist cell reduced to its count, whatever format wrote it. */
+function shortChecklist(value: string): string {
+  const count = (value.split(':')[0] ?? '').split('·')[0]?.replace('✓', '').trim() ?? '';
+  return count.length > 0 ? count : 'not used';
+}
+
+/** A row with exactly the current columns: padded, and the checklist shortened. */
+function normaliseRow(cells: string[]): string {
+  const padded = [...cells];
+  while (padded.length < AUDIT_COLUMNS - 1) padded.push('-');
+  while (padded.length < AUDIT_COLUMNS) padded.push('');
+  padded[4] = shortChecklist(padded[4] ?? '');
+  return `| ${padded.slice(0, AUDIT_COLUMNS).join(' | ')} |`;
 }
 
 /**
- * Rewrites a page's table rows - the format before the list format - as list
- * entries, so a month's page reads the same on a phone from top to bottom.
- *
- * The old checklist cell named every ticked item, which is what made rows
- * tall; only its count ("3/6") is kept. A row it cannot read is left as it is.
+ * Rewrites a log page in the current format: one table, current columns,
+ * checklist as a count. Handles every format this app has written - tables of
+ * six, seven or eight columns, and the brief list format - and is idempotent,
+ * so it is safe on every write.
  */
-export function tableRowsToEntries(content: string): string {
-  if (!content.includes('| Verified (IST) |')) return content;
+export function upgradeAuditHeader(content: string): string {
+  const lines = content.split('\n');
+  const prefix: string[] = [];
+  const rows: string[] = [];
 
-  const out: string[] = [];
-  for (const line of content.split('\n')) {
-    if (line.startsWith('| Verified (IST) |') || /^\|(?:\s*---\s*\|)+\s*$/u.test(line)) continue;
+  for (let at = 0; at < lines.length; at++) {
+    const line = lines[at] ?? '';
+    if (line.trim() === LEGACY_NOTE_LINE || line === '---') continue;
+    if (line.startsWith('| Verified') || TABLE_RULE.test(line)) continue;
 
-    const cells = line.startsWith('|') ? splitRow(line) : [];
-    const post = /^\[(t3_[a-z0-9]+)\]\(([^)]+)\)$/u.exec(cells[1] ?? '');
-    if (!post) {
-      out.push(line);
+    if (line.startsWith('|')) {
+      const cells = splitRow(line);
+      if (POST_CELL.test(cells[1] ?? '')) rows.push(normaliseRow(cells));
+      else prefix.push(line);
       continue;
     }
 
-    const [when, , author, mod, checklist, notice, note, status] = cells;
-    const ratio = (checklist ?? '').split(':')[0]?.trim() || 'not used';
-    out.push('', `**${when ?? ''}** · [open post](${post[2]}) \`${post[1]}\``, `- ${author ?? ''} · verified by ${mod ?? ''}`);
-    out.push(`- Checklist ${ratio}`);
-    if (note && note !== '-') out.push(`- Note: ${note}`);
-    if (notice && notice !== 'default') out.push(`- Notice: ${notice}`);
-    // Left as "- Status: " when the row had none, so the backfill can fill it.
-    out.push(`${STATUS_PREFIX}${status ?? ''}`);
+    const entry = LIST_ENTRY.exec(line);
+    if (entry) {
+      const fields: Record<string, string> = {};
+      let byLine = '';
+      for (at += 1; at < lines.length && (lines[at] ?? '').startsWith('- '); at++) {
+        const bullet = (lines[at] ?? '').slice(2);
+        const named = /^(Checklist|Note|Notice|Status):?\s?(.*)$/u.exec(bullet);
+        if (named) fields[named[1] ?? ''] = (named[2] ?? '').trim();
+        else byLine = bullet;
+      }
+      at -= 1;
+      const [author, mod] = byLine.split(' · verified by ');
+      rows.push(
+        normaliseRow([
+          entry[1] ?? '',
+          `[${entry[3] ?? ''}](${entry[2] ?? ''})`,
+          author ?? '',
+          mod ?? '',
+          fields['Checklist'] ?? '',
+          fields['Notice'] || 'default',
+          fields['Note'] || '-',
+          fields['Status'] ?? '',
+        ]),
+      );
+      continue;
+    }
+
+    prefix.push(line);
   }
-  return out.join('\n');
+
+  while (prefix.length > 0 && (prefix.at(-1) ?? '').trim() === '') prefix.pop();
+  return [...prefix, '', AUDIT_TABLE_HEADER, AUDIT_TABLE_RULE, ...rows].join('\n');
 }
 
 /** Splits a table row into cells, respecting escaped pipes. */
@@ -252,7 +266,8 @@ function splitRow(line: string): string[] {
 /**
  * Sets the Status cell of one post's row. Returns null when the row is not on
  * the page, or when nothing would change - including, with `onlyIfMissing`,
- * when the row already has a status.
+ * when the row already has a status. Expects a page `upgradeAuditHeader` has
+ * already brought up to date.
  */
 export function withStatus(
   content: string,
@@ -261,23 +276,6 @@ export function withStatus(
   onlyIfMissing = false,
 ): string | null {
   const lines = content.split('\n');
-
-  // An entry in the list format: its Status line follows its heading.
-  const heading = lines.findIndex((line) => line.startsWith('**') && line.includes(`\`${postId}\``));
-  if (heading >= 0) {
-    for (let at = heading + 1; at < lines.length && (lines[at] ?? '').startsWith('- '); at++) {
-      const line = lines[at] ?? '';
-      if (!line.startsWith(STATUS_PREFIX)) continue;
-      if (onlyIfMissing && line.slice(STATUS_PREFIX.length).trim().length > 0) return null;
-      const updated = `${STATUS_PREFIX}${cell(status)}`;
-      if (updated === line) return null;
-      lines[at] = updated;
-      return lines.join('\n');
-    }
-    return null;
-  }
-
-  // A row in the table format pages used before the list format.
   const index = lines.findIndex((line) => line.startsWith('|') && line.includes(`[${postId}](`));
   if (index < 0) return null;
 
@@ -288,7 +286,7 @@ export function withStatus(
   }
 
   // A row from before the note column existed is padded, so the status lands
-  // under "Status" rather than under "Mod note".
+  // under "Status" rather than under "Note".
   while (cells.length < AUDIT_COLUMNS - 1) cells.push('-');
   cells[AUDIT_COLUMNS - 1] = cell(status);
   const updated = `| ${cells.slice(0, AUDIT_COLUMNS).join(' | ')} |`;
@@ -320,24 +318,19 @@ export function auditRow(record: VerificationRecord, subredditName: string): str
   );
   const link = `https://www.reddit.com/r/${subredditName}/comments/${record.postId.replace('t3_', '')}/`;
 
-  // A short stack of lines rather than a table row: an eight-column table is
-  // unreadable on a phone, while lines simply wrap. The post id appears once,
-  // in backticks, which is what `withStatus` and the duplicate guard find.
-  const lines = [
-    '',
-    `**${when}** · [open post](${link}) \`${record.postId}\``,
-    `- ${record.authorName ? `u/${record.authorName}` : '[deleted]'} · verified by u/${record.modName}`,
-    `- Checklist ${cell(checklistSummary(record))}`,
+  const cells = [
+    cell(when),
+    `[${cell(record.postId)}](${link})`,
+    cell(record.authorName ? `u/${record.authorName}` : '[deleted]'),
+    cell(`u/${record.modName}`),
+    cell(checklistSummary(record)),
+    cell(record.templateLabel ?? 'default'),
+    cell(record.note.length > 0 ? record.note : '-'),
+    // Verifying approves the post, so it starts out up.
+    'up',
   ];
-  if (record.note.length > 0) lines.push(`- Note: ${cell(record.note)}`);
-  if (record.templateLabel) lines.push(`- Notice: ${cell(record.templateLabel)}`);
-  // Verifying approves the post, so it starts out up.
-  lines.push(`${STATUS_PREFIX}up`);
-  return lines.join('\n');
+  return `| ${cells.join(' | ')} |`;
 }
-
-/** The line `withStatus` rewrites in a list-format entry. */
-const STATUS_PREFIX = '- Status: ';
 
 export function createAuditLogService(deps: AuditLogDeps): AuditLogService {
   const { reddit, redis, settings, log, now } = deps;

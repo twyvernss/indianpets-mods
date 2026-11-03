@@ -212,17 +212,18 @@ export function buildHistoryPage(input: {
   if (input.matches.length === 0) {
     lines.push('No other account shares their payment details, links or wording.');
   } else {
-    lines.push('Strongest first. Shared payment details are the strongest sign of one person.');
-    // Lists, not tables: a phone cannot fit four columns, but a line wraps.
+    lines.push(
+      'Strongest first. Shared payment details are the strongest sign of one person.',
+      '',
+      '| Account | Banned | What matches | Their posts |',
+      '| --- | --- | --- | --- |',
+    );
     for (const match of input.matches) {
       const posts = match.postIds
         .map((postId, index) => `[${index + 1}](${postLink(subredditName, postId)})`)
         .join(' ');
       lines.push(
-        '',
-        `**[u/${cell(match.author)}](https://www.reddit.com/user/${match.author}/)**${match.banned ? ' · **BANNED here**' : ''}`,
-        `- ${cell(describeMatch(match) || 'similar')}`,
-        `- Their posts: ${posts}`,
+        `| [u/${cell(match.author)}](https://www.reddit.com/user/${match.author}/) | ${match.banned ? '**YES**' : 'no'} | ${cell(describeMatch(match) || 'similar')} | ${posts} |`,
       );
     }
   }
@@ -231,20 +232,16 @@ export function buildHistoryPage(input: {
   if (input.rows.length === 0) {
     lines.push('No posts found in this subreddit.');
   } else {
+    lines.push(
+      '| Posted | Post | Flair | State | Verified by | Checklist | Note |',
+      '| --- | --- | --- | --- | --- | --- | --- |',
+    );
     for (const row of input.rows) {
       const record = row.record?.status === 'complete' ? row.record : null;
+      const verified = record ? `u/${record.modName}, ${formatShortDate(record.verifiedAtMs)}` : '-';
       lines.push(
-        '',
-        `**${formatShortDate(row.postedAtMs)}** · [open post](${postLink(subredditName, row.postId)}) · ${STATE_LABEL[row.state]}`,
-        `- Flair: ${cell(row.flairText ?? 'none')}`,
+        `| ${formatShortDate(row.postedAtMs)} | [open](${postLink(subredditName, row.postId)}) | ${cell(row.flairText ?? '-')} | ${STATE_LABEL[row.state]} | ${cell(verified)} | ${record ? cell(checklistSummary(record)) : '-'} | ${cell(record && record.note.length > 0 ? record.note : '-')} |`,
       );
-      if (record) {
-        lines.push(`- Verified by u/${record.modName}, ${formatShortDate(record.verifiedAtMs)}`);
-        lines.push(`- Checklist ${cell(checklistSummary(record))}`);
-        if (record.note.length > 0) lines.push(`- Note: ${cell(record.note)}`);
-      } else {
-        lines.push('- Not verified');
-      }
     }
   }
 

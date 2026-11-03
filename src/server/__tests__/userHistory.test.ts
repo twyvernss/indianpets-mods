@@ -84,19 +84,13 @@ describe('history page', () => {
   });
 
   it('links every post and says who verified it, with the note', () => {
-    expect(page).toContain('[open post](https://www.reddit.com/r/IndianPets/comments/abc/)');
-    expect(page).toContain('- Verified by u/mod_one, 2 Nov 2026');
-    expect(page).toContain('- Note: called the clinic');
+    expect(page).toContain('[open](https://www.reddit.com/r/IndianPets/comments/abc/)');
+    expect(page).toContain('| u/mod_one, 2 Nov 2026 | not used | called the clinic |');
   });
 
   it('lists matching accounts with ban status and links to their posts', () => {
-    expect(page).toContain('**[u/old_alt](https://www.reddit.com/user/old_alt/)** · **BANNED here**');
-    expect(page).toContain('- same UPI ID; 80% same wording');
-    expect(page).toContain('- Their posts: [1](https://www.reddit.com/r/IndianPets/comments/zzz/)');
-  });
-
-  it('uses no tables, so it reads on a phone', () => {
-    expect(page).not.toMatch(/^\|/mu);
+    expect(page).toContain('[u/old_alt](https://www.reddit.com/user/old_alt/) | **YES** | same UPI ID; 80% same wording');
+    expect(page).toContain('[1](https://www.reddit.com/r/IndianPets/comments/zzz/)');
   });
 
   it('never copies post titles onto the page', () => {
