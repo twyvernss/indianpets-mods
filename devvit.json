@@ -96,7 +96,9 @@
     "settingsForm": "/internal/form/settings-submit",
     "noticesForm": "/internal/form/notices-submit",
     "followUpForm": "/internal/form/follow-up-submit",
-    "userLookupForm": "/internal/form/user-lookup-submit"
+    "userLookupForm": "/internal/form/user-lookup-submit",
+    "settingsPickerForm": "/internal/form/settings-pick",
+    "noticesPickerForm": "/internal/form/notices-pick"
   },
   "triggers": {
     "onAutomoderatorFilterPost": "/internal/triggers/automod-filter-post",

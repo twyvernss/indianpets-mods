@@ -145,8 +145,11 @@ export const CONFIG = {
   },
 
   history: {
-    /** The user's own posts read from Reddit when building their page. */
-    postsToScan: 300,
+    /**
+     * The user's own posts read from Reddit when building their page: one
+     * page of the listing, which keeps a rebuild to a few seconds.
+     */
+    postsToScan: 100,
     /** Rows on a history page. */
     maxRows: 100,
     /** Their own posts whose matches are gathered for the page. */

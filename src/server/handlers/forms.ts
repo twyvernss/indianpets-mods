@@ -7,9 +7,13 @@ import { asPostId } from '../data/tokenRepo.js';
 import {
   CHECKLIST_FIELD,
   FOLLOW_UP_FIELD,
+  isMessageChoice,
+  isSettingsSection,
   LOOKUP_FIELD,
-  NOTICE_SLOTS,
-  noticeFieldNames,
+  noticeEditorResponse,
+  PICK_FIELD,
+  pickedValue,
+  settingsFormResponse,
 } from '../formDefinitions.js';
 import { describeError } from '../lib/logger.js';
 import {
@@ -119,6 +123,11 @@ forms.post('/settings-submit', async (c) => {
         showToast: { text: 'Settings reset to the app defaults.', appearance: 'success' },
       });
     }
+    if (body['section'] === 'reset') {
+      return c.json<UiResponse>({
+        showToast: { text: 'Nothing was reset.', appearance: 'neutral' },
+      });
+    }
 
     // `pickOverrides` drops anything that is not a known, overridable key, so a
     // crafted request cannot write arbitrary data into the config document.
@@ -134,17 +143,65 @@ forms.post('/settings-submit', async (c) => {
   }
 });
 
+/** Step 2 of the settings editor: open the section that was picked. */
+forms.post('/settings-pick', async (c) => {
+  const { log, settings, gate, reddit } = getContainer();
+
+  try {
+    const username = await gate.actingUsername();
+    if (!username || !(await gate.isModerator(username))) {
+      return c.json<UiResponse>({ showToast: { text: TOASTS.notModerator, appearance: 'neutral' } });
+    }
+
+    const body = await c.req.json<Record<string, unknown>>();
+    const section = pickedValue(body[PICK_FIELD]);
+    if (!isSettingsSection(section)) {
+      return c.json<UiResponse>({ showToast: { text: 'Pick a section first.', appearance: 'neutral' } });
+    }
+
+    // Flairs are only needed for the section that shows the flair menu.
+    const [current, flairs] = await Promise.all([
+      settings.get(),
+      section === 'fundraisers' ? reddit.getPostFlairs() : Promise.resolve([]),
+    ]);
+    return c.json<UiResponse>(settingsFormResponse(current, flairs, section));
+  } catch (error) {
+    log.error('settings-pick failed', { reason: describeError(error) });
+    return c.json<UiResponse>(UNEXPECTED_ERROR);
+  }
+});
+
+/** Step 2 of the bot-messages editor: open the message that was picked. */
+forms.post('/notices-pick', async (c) => {
+  const { log, settings, gate } = getContainer();
+
+  try {
+    const username = await gate.actingUsername();
+    if (!username || !(await gate.isModerator(username))) {
+      return c.json<UiResponse>({ showToast: { text: TOASTS.notModerator, appearance: 'neutral' } });
+    }
+
+    const body = await c.req.json<Record<string, unknown>>();
+    const choice = pickedValue(body[PICK_FIELD]);
+    if (!isMessageChoice(choice)) {
+      return c.json<UiResponse>({ showToast: { text: 'Pick a message first.', appearance: 'neutral' } });
+    }
+    return c.json<UiResponse>(noticeEditorResponse(await settings.get(), choice));
+  } catch (error) {
+    log.error('notices-pick failed', { reason: describeError(error) });
+    return c.json<UiResponse>(UNEXPECTED_ERROR);
+  }
+});
+
 /**
- * The verification-notice editor.
+ * Saves the one message that was edited.
  *
- * Numbered title/message pairs are folded back into the same block format the
- * setting has always stored, so nothing downstream changes and a moderator who
- * prefers to edit the raw setting still can. A slot needs BOTH a title and a
- * message to count: a title with no body would post an empty comment, and a
- * body with no title could not be picked from the dropdown.
+ * A saved notice needs both a title and a message to appear when verifying;
+ * clearing the title deletes it. The other notices are written back as they
+ * are, so editing one never disturbs the rest.
  */
 forms.post('/notices-submit', async (c) => {
-  const { log, config, gate } = getContainer();
+  const { log, config, gate, settings } = getContainer();
 
   try {
     const username = await gate.actingUsername();
@@ -155,39 +212,46 @@ forms.post('/notices-submit', async (c) => {
     }
 
     const body = await c.req.json<Record<string, unknown>>();
-
-    const templates: MessageTemplate[] = [];
-    for (let index = 0; index < NOTICE_SLOTS; index++) {
-      const names = noticeFieldNames(index);
-      const label = sanitizeText(body[names.title], CONFIG.templateLabelMaxLength);
-      const text = sanitizeMultiline(body[names.body], CONFIG.templateBodyMaxLength);
-      if (label.length === 0 || text.length === 0) continue;
-      templates.push({ id: `tpl${templates.length}`, label, body: text });
+    const choice = typeof body['choice'] === 'string' ? body['choice'] : '';
+    if (!isMessageChoice(choice)) {
+      return c.json<UiResponse>({ showToast: { text: 'That message could not be saved.', appearance: 'neutral' } });
     }
 
-    await config.merge({
-      customNoticeText: sanitizeMultiline(
-        body['customNoticeText'],
-        CONFIG.templateBodyMaxLength,
-      ),
-      automodReplyText: sanitizeMultiline(body['automodReplyText'], CONFIG.templateBodyMaxLength),
-      customReminderText: sanitizeMultiline(
-        body['customReminderText'],
-        CONFIG.templateBodyMaxLength,
-      ),
-      // Stored blank when every slot is empty, which the settings layer reads
-      // as "fall back to the starter notices".
-      messageTemplates: templates.length > 0 ? messageTemplatesToText(templates) : '',
-    });
+    const text = sanitizeMultiline(body['body'], CONFIG.templateBodyMaxLength);
 
-    log.info('verification notices updated', { mod: username, count: templates.length });
+    if (choice === 'default' || choice === 'automod' || choice === 'reminder') {
+      const key =
+        choice === 'default' ? 'customNoticeText' : choice === 'automod' ? 'automodReplyText' : 'customReminderText';
+      await config.merge({ [key]: text });
+      log.info('bot message updated', { mod: username, choice });
+      return c.json<UiResponse>({
+        showToast: {
+          text: text.length > 0 ? 'Saved.' : 'Saved. The built-in wording is used.',
+          appearance: 'success',
+        },
+      });
+    }
+
+    const index = Number(choice.slice(5));
+    const label = sanitizeText(body['title'], CONFIG.templateLabelMaxLength);
+    const current = await settings.get();
+    const notices: (MessageTemplate | null)[] = Array.from(
+      { length: Math.max(current.messageTemplates.length, index + 1) },
+      (_, slot) => current.messageTemplates[slot] ?? null,
+    );
+    notices[index] = label.length > 0 && text.length > 0 ? { id: '', label, body: text } : null;
+
+    const kept = notices
+      .filter((notice): notice is MessageTemplate => notice !== null)
+      .map((notice, slot) => ({ ...notice, id: `tpl${slot}` }));
+    // Stored blank when every notice is gone, which the settings layer reads
+    // as "fall back to the starter notices".
+    await config.merge({ messageTemplates: kept.length > 0 ? messageTemplatesToText(kept) : '' });
+    log.info('saved notice updated', { mod: username, slot: index, count: kept.length });
 
     return c.json<UiResponse>({
       showToast: {
-        text:
-          templates.length > 0
-            ? `Saved. ${templates.length} notice${templates.length === 1 ? '' : 's'} to pick from.`
-            : 'Saved. No custom notices, so the starter list is used.',
+        text: notices[index] ? `Saved. ${kept.length} notice${kept.length === 1 ? '' : 's'} to pick from.` : 'Notice removed.',
         appearance: 'success',
       },
     });
@@ -283,7 +347,7 @@ forms.post('/user-lookup-submit', async (c) => {
       });
     }
 
-    const result = await history.rebuild(typed);
+    const result = await history.open(typed);
     log.info('poster history looked up', { mod: moderator, kind: result.kind });
     return c.json<UiResponse>(historyResponse(result, typed, reddit.subredditName()));
   } catch (error) {

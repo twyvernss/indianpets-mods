@@ -1,5 +1,6 @@
 import type { T3 } from '@devvit/web/shared';
 import { describe, expect, it } from 'vitest';
+import { JOBS } from '../config.js';
 import { createFingerprintRepo } from '../data/fingerprintRepo.js';
 import { createLinkRepo } from '../data/linkRepo.js';
 import { createVerificationRepo } from '../data/verificationRepo.js';
@@ -83,14 +84,19 @@ describe('history page', () => {
   });
 
   it('links every post and says who verified it, with the note', () => {
-    expect(page).toContain('[open](https://www.reddit.com/r/IndianPets/comments/abc/)');
-    expect(page).toContain('u/mod_one, 2 Nov 2026');
-    expect(page).toContain('called the clinic');
+    expect(page).toContain('[open post](https://www.reddit.com/r/IndianPets/comments/abc/)');
+    expect(page).toContain('- Verified by u/mod_one, 2 Nov 2026');
+    expect(page).toContain('- Note: called the clinic');
   });
 
   it('lists matching accounts with ban status and links to their posts', () => {
-    expect(page).toContain('[u/old_alt](https://www.reddit.com/user/old_alt/) | **YES** | same UPI ID; 80% same wording');
-    expect(page).toContain('[1](https://www.reddit.com/r/IndianPets/comments/zzz/)');
+    expect(page).toContain('**[u/old_alt](https://www.reddit.com/user/old_alt/)** · **BANNED here**');
+    expect(page).toContain('- same UPI ID; 80% same wording');
+    expect(page).toContain('- Their posts: [1](https://www.reddit.com/r/IndianPets/comments/zzz/)');
+  });
+
+  it('uses no tables, so it reads on a phone', () => {
+    expect(page).not.toMatch(/^\|/mu);
   });
 
   it('never copies post titles onto the page', () => {
@@ -130,17 +136,40 @@ function harness(overrides: Partial<AppSettings> = {}) {
     log: fakeLogger(),
     now: () => NOW,
   });
+  const scheduler = new FakeScheduler();
   const service = createUserHistoryService({
     reddit,
     redis,
+    scheduler,
     repo,
     alt,
     settings,
     log: fakeLogger(),
     now: () => NOW,
   });
-  return { reddit, repo, service };
+  return { reddit, repo, scheduler, service };
 }
+
+describe('open from a menu', () => {
+  it('builds a first-ever page while the moderator waits', async () => {
+    const h = harness();
+    const result = await h.service.open('op_user');
+    expect(result).toMatchObject({ kind: 'ready', postCount: 0 });
+    expect(h.reddit.wiki.has('fundraiser-verifications/users/op_user')).toBe(true);
+    expect(h.scheduler.jobsNamed(JOBS.userHistory)).toHaveLength(0);
+  });
+
+  it('opens an existing page at once and refreshes it in the background', async () => {
+    const h = harness();
+    await h.service.rebuild('op_user');
+    const writesBefore = h.reddit.calls.filter((call) => call === 'writeWiki').length;
+
+    const result = await h.service.open('op_user');
+    expect(result).toMatchObject({ kind: 'ready', postCount: null, refreshing: true });
+    expect(h.reddit.calls.filter((call) => call === 'writeWiki').length).toBe(writesBefore);
+    expect(h.scheduler.jobsNamed(JOBS.userHistory)[0]?.data).toEqual({ username: 'op_user' });
+  });
+});
 
 describe('rebuild', () => {
   it('writes the page and lists it on the index exactly once', async () => {

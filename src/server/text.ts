@@ -337,13 +337,16 @@ export function buildAltReportReason(match: MatchSummary): string {
 /** Toast after the history page is rebuilt from a menu action. */
 export function historyReadyToast(input: {
   username: string;
-  postCount: number;
+  /** Null when the page is being refreshed in the background. */
+  postCount: number | null;
   top: MatchSummary | null;
 }): string {
-  const posts = `${input.postCount} post${input.postCount === 1 ? '' : 's'} here`;
-  if (!input.top) return `u/${input.username}: ${posts}. No other account matches their posts.`;
+  const posts =
+    input.postCount === null ? '' : ` ${input.postCount} post${input.postCount === 1 ? '' : 's'} here.`;
+  const refresh = input.postCount === null ? ' Page refreshing - reload in a few seconds.' : '';
+  if (!input.top) return `u/${input.username}:${posts} No other account matches their posts.${refresh}`;
   const banned = input.top.banned ? ' (banned)' : '';
-  return `u/${input.username}: ${posts}. Closest match u/${input.top.author}${banned}: ${describeMatch(input.top)}.`;
+  return `u/${input.username}:${posts} Closest match u/${input.top.author}${banned}: ${describeMatch(input.top)}.${refresh}`;
 }
 
 /** Appended to a report when the author is below the configured thresholds. */

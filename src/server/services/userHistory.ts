@@ -1,5 +1,5 @@
 import type { T3 } from '@devvit/web/shared';
-import { CONFIG, KEY_PREFIX } from '../config.js';
+import { CONFIG, JOBS, KEY_PREFIX } from '../config.js';
 import type { RedisPort } from '../data/redisPort.js';
 import { allByScore } from '../data/redisPort.js';
 import type { VerificationRepo } from '../data/verificationRepo.js';
@@ -9,8 +9,8 @@ import type { SettingsReader } from '../settings.js';
 import { describeMatch } from '../text.js';
 import type { VerificationRecord } from '../types.js';
 import type { AccountMatch, AltService } from './altMatch.js';
-import { cell, wikiPageUrl } from './auditLog.js';
-import type { AuthorSnapshot, RedditPort, UserPostSummary } from './redditPort.js';
+import { cell, checklistSummary, wikiPageUrl } from './auditLog.js';
+import type { AuthorSnapshot, RedditPort, SchedulerPort, UserPostSummary } from './redditPort.js';
 
 /**
  * A moderator-only wiki page per poster: `{wikiLogPage}/users/{username}`.
@@ -27,16 +27,31 @@ import type { AuthorSnapshot, RedditPort, UserPostSummary } from './redditPort.j
  */
 export type UserHistoryService = {
   rebuild(username: string, options?: { ensureIndexed?: T3 }): Promise<HistoryResult>;
+  /**
+   * For a moderator waiting on a menu action: when the page already exists,
+   * works out the closest match (fast), queues a full rebuild in the
+   * background and returns at once. Only a first-ever page is built inline.
+   */
+  open(username: string, options?: { ensureIndexed?: T3 }): Promise<HistoryResult>;
 };
 
 export type HistoryResult =
   | { kind: 'off' }
   | { kind: 'blocked'; page: string; reason: string }
-  | { kind: 'ready'; page: string; postCount: number; top: AccountMatch | null };
+  | {
+      kind: 'ready';
+      page: string;
+      /** Null when the count was not recomputed (a background refresh). */
+      postCount: number | null;
+      top: AccountMatch | null;
+      /** True when the page is being refreshed in the background. */
+      refreshing?: boolean;
+    };
 
 export type UserHistoryDeps = {
   reddit: RedditPort;
   redis: RedisPort;
+  scheduler: SchedulerPort;
   repo: VerificationRepo;
   alt: AltService;
   settings: SettingsReader;
@@ -197,18 +212,17 @@ export function buildHistoryPage(input: {
   if (input.matches.length === 0) {
     lines.push('No other account shares their payment details, links or wording.');
   } else {
-    lines.push(
-      'Strongest first. Payment details (UPI ID, phone, bank account) are the strongest sign of the same person.',
-      '',
-      '| Account | Banned here | What matches | Their matching posts |',
-      '| --- | --- | --- | --- |',
-    );
+    lines.push('Strongest first. Shared payment details are the strongest sign of one person.');
+    // Lists, not tables: a phone cannot fit four columns, but a line wraps.
     for (const match of input.matches) {
       const posts = match.postIds
         .map((postId, index) => `[${index + 1}](${postLink(subredditName, postId)})`)
         .join(' ');
       lines.push(
-        `| [u/${cell(match.author)}](https://www.reddit.com/user/${match.author}/) | ${match.banned ? '**YES**' : 'no'} | ${cell(describeMatch(match) || 'similar')} | ${posts} |`,
+        '',
+        `**[u/${cell(match.author)}](https://www.reddit.com/user/${match.author}/)**${match.banned ? ' · **BANNED here**' : ''}`,
+        `- ${cell(describeMatch(match) || 'similar')}`,
+        `- Their posts: ${posts}`,
       );
     }
   }
@@ -217,16 +231,20 @@ export function buildHistoryPage(input: {
   if (input.rows.length === 0) {
     lines.push('No posts found in this subreddit.');
   } else {
-    lines.push(
-      '| Posted (IST) | Post | Flair | State | Verified by | Mod note |',
-      '| --- | --- | --- | --- | --- | --- |',
-    );
     for (const row of input.rows) {
       const record = row.record?.status === 'complete' ? row.record : null;
-      const verified = record ? `u/${record.modName}, ${formatShortDate(record.verifiedAtMs)}` : '-';
       lines.push(
-        `| ${formatShortDate(row.postedAtMs)} | [open](${postLink(subredditName, row.postId)}) | ${cell(row.flairText ?? '-')} | ${STATE_LABEL[row.state]} | ${cell(verified)} | ${cell(record && record.note.length > 0 ? record.note : '-')} |`,
+        '',
+        `**${formatShortDate(row.postedAtMs)}** · [open post](${postLink(subredditName, row.postId)}) · ${STATE_LABEL[row.state]}`,
+        `- Flair: ${cell(row.flairText ?? 'none')}`,
       );
+      if (record) {
+        lines.push(`- Verified by u/${record.modName}, ${formatShortDate(record.verifiedAtMs)}`);
+        lines.push(`- Checklist ${cell(checklistSummary(record))}`);
+        if (record.note.length > 0) lines.push(`- Note: ${cell(record.note)}`);
+      } else {
+        lines.push('- Not verified');
+      }
     }
   }
 
@@ -234,7 +252,7 @@ export function buildHistoryPage(input: {
 }
 
 export function createUserHistoryService(deps: UserHistoryDeps): UserHistoryService {
-  const { reddit, redis, repo, alt, settings, log, now } = deps;
+  const { reddit, redis, scheduler, repo, alt, settings, log, now } = deps;
 
   /**
    * Lists the person on the A-Z index of history pages.
@@ -263,6 +281,22 @@ export function createUserHistoryService(deps: UserHistoryDeps): UserHistoryServ
   }
 
   return {
+    async open(username, options = {}): Promise<HistoryResult> {
+      const config = await settings.get();
+      if (!config.enabled || !config.wikiLogEnabled || !config.userHistoryEnabled) return { kind: 'off' };
+
+      const page = userHistoryPageName(config.wikiLogPage, username);
+      if ((await reddit.readWikiPage(page)) === null) return this.rebuild(username, options);
+
+      const matches = await alt.matchesForAuthor(username, options.ensureIndexed);
+      await scheduler.runJob({
+        name: JOBS.userHistory,
+        data: { username },
+        runAt: new Date(now() + 1000),
+      });
+      return { kind: 'ready', page, postCount: null, top: matches[0] ?? null, refreshing: true };
+    },
+
     async rebuild(username, options = {}): Promise<HistoryResult> {
       const config = await settings.get();
       if (!config.enabled || !config.wikiLogEnabled || !config.userHistoryEnabled) return { kind: 'off' };

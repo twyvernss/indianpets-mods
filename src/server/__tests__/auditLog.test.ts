@@ -69,23 +69,32 @@ describe('page naming', () => {
 });
 
 describe('row rendering', () => {
-  it('links the post and summarises the checklist', () => {
+  it('links the post and shows the checklist as a count with what was missed', () => {
     const row = auditRow(record(), 'IndianPets');
-    expect(row).toContain('https://www.reddit.com/r/IndianPets/comments/abc123/');
-    expect(row).toContain('u/op_user');
-    expect(row).toContain('u/mod_one');
-    expect(row).toContain('2/3');
-    expect(row).toContain('Clinic contacted');
+    expect(row).toContain('[open post](https://www.reddit.com/r/IndianPets/comments/abc123/)');
+    expect(row).toContain('u/op_user · verified by u/mod_one');
+    expect(row).toContain('- Checklist 2/3 · missing: Photo with username');
+  });
+
+  it('shows a fully ticked checklist as just the count', () => {
+    const all = record({ checklist: [{ label: 'a', checked: true }, { label: 'b', checked: true }] });
+    expect(auditRow(all, 'IndianPets')).toContain('- Checklist 2/2 ✓');
+  });
+
+  it('is a short stack of lines a phone can show, never a wide table row', () => {
+    const row = auditRow(record(), 'IndianPets');
+    expect(row).not.toContain('|');
+    for (const line of row.split('\n')) expect(line.length).toBeLessThan(140);
   });
 
   it('writes the moderator note, now that the wiki replaces the mod note', () => {
-    const row = auditRow(record(), 'IndianPets');
-    expect(row).toContain('clinic phone 98765 43210');
-    expect(auditPageHeader('IndianPets')).toContain('| Mod note |');
+    expect(auditRow(record(), 'IndianPets')).toContain('- Note: clinic phone 98765 43210');
   });
 
-  it('shows a dash rather than an empty cell when there is no note, and starts the post as up', () => {
-    expect(auditRow(record({ note: '' }), 'IndianPets').endsWith('| - | up |')).toBe(true);
+  it('leaves out an empty note line, and starts the post as up', () => {
+    const row = auditRow(record({ note: '' }), 'IndianPets');
+    expect(row).not.toContain('Note:');
+    expect(row.endsWith('- Status: up')).toBe(true);
   });
 
   it('widens a seven-column page to add Status, and drops the old "notes not included" line', () => {
@@ -121,9 +130,15 @@ describe('row rendering', () => {
     ].join('\n');
 
     const updated = withStatus(page, 't3_one', 'removed, 3 Nov 2026') ?? '';
-    const lines = updated.split('\n');
-    expect(lines.find((line) => line.includes('t3_one'))?.endsWith('| removed, 3 Nov 2026 |')).toBe(true);
-    expect(lines.find((line) => line.includes('t3_two'))?.endsWith('| up |')).toBe(true);
+    const entries = updated.split('`t3_two`');
+    expect(entries[0]).toContain('- Status: removed, 3 Nov 2026');
+    expect(entries[1]).toContain('- Status: up');
+    expect(entries[1]).not.toContain('removed');
+  });
+
+  it('still updates a row in a table-format page from before the list format', () => {
+    const row = '| a | [t3_old](link) | c | d | e | f | g | up |';
+    expect(withStatus(row, 't3_old', 'removed')).toBe('| a | [t3_old](link) | c | d | e | f | g | removed |');
   });
 
   it('pads an old six-cell row so the status lands under Status', () => {
@@ -132,14 +147,17 @@ describe('row rendering', () => {
     expect(updated).toBe('| a | [t3_old](link) | c | d | e | f | - | up |');
   });
 
-  it('keeps escaped pipes inside a cell', () => {
-    const row = auditRow(record({ note: 'bill | receipt' }), 'IndianPets');
+  it('keeps escaped pipes inside a cell of a table-format row', () => {
+    const row = '| a | [t3_abc123](l) | c | d | e | f | bill \\| receipt | up |';
     expect(withStatus(row, 't3_abc123', 'removed')).toContain('bill \\| receipt | removed |');
   });
 
   it('only fills a missing status when asked to', () => {
     const row = auditRow(record(), 'IndianPets');
     expect(withStatus(row, 't3_abc123', 'removed', true)).toBeNull();
+    expect(withStatus(row.replace('- Status: up', '- Status: '), 't3_abc123', 'removed', true)).toContain(
+      '- Status: removed',
+    );
     const old = '| a | [t3_abc123](l) | c | d | e | f | g |';
     expect(withStatus(old, 't3_abc123', 'removed', true)).toBe(
       '| a | [t3_abc123](l) | c | d | e | f | g | removed |',
@@ -157,12 +175,9 @@ describe('row rendering', () => {
     expect(statusFromState('unknown')).toBeNull();
   });
 
-  it('escapes pipes so one row cannot break the table', () => {
-    const row = auditRow(
-      record({ checklist: [{ label: 'Bill | receipt seen', checked: true }] }),
-      'IndianPets',
-    );
-    expect(row).toContain('Bill \\| receipt seen');
+  it('keeps a note on one line, so one entry cannot break the next', () => {
+    const row = auditRow(record({ note: 'line one\nline two' }), 'IndianPets');
+    expect(row).toContain('- Note: line one line two');
   });
 
   it('handles a deleted author and a picked notice', () => {
@@ -183,8 +198,7 @@ describe('writing the log', () => {
 
     const page = h.reddit.wiki.get(PAGE);
     expect(page).toBeDefined();
-    expect(page).toContain('Fundraiser verification log');
-    expect(page).toContain('| --- |');
+    expect(page).toContain('Fundraiser verifications');
     expect(page).toContain('t3_abc123');
   });
 
@@ -196,8 +210,8 @@ describe('writing the log', () => {
     const page = h.reddit.wiki.get(PAGE) ?? '';
     expect(page).toContain('t3_abc123');
     expect(page).toContain('t3_second');
-    // One header, two rows.
-    expect(page.split('Fundraiser verification log')).toHaveLength(2);
+    // One header, two entries.
+    expect(page.split('# Fundraiser verifications')).toHaveLength(2);
   });
 
   it('does not write the same post twice if the job is redelivered', async () => {
@@ -240,7 +254,7 @@ describe('setStatus', () => {
       status: 'removed, 28 Sep 2026',
     });
     expect(done).toBe(true);
-    expect(h.reddit.wiki.get(PAGE)).toContain('| removed, 28 Sep 2026 |');
+    expect(h.reddit.wiki.get(PAGE)).toContain('- Status: removed, 28 Sep 2026');
   });
 
   it('writes nothing for a post that was never logged', async () => {
@@ -383,10 +397,10 @@ describe('wiki privacy', () => {
     await h.service.record(record());
 
     const page = h.reddit.wiki.get(PAGE) ?? '';
-    const header = page.split('| Verified (IST) |')[0] ?? '';
+    const header = page.split('`t3_abc123`')[0] ?? '';
     expect(header).not.toContain('u/op_user');
     expect(header).not.toContain('u/mod_one');
-    expect(header).toContain('restricted to moderators');
+    expect(header).toContain('Moderators only');
   });
 
   it('still posts to mod discussions when the wiki is refused', async () => {

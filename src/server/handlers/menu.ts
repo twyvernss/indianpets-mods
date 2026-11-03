@@ -4,8 +4,8 @@ import { getContainer } from '../container.js';
 import { asPostId } from '../data/tokenRepo.js';
 import {
   followUpFormResponse,
-  noticesFormResponse,
-  settingsFormResponse,
+  noticesPickerResponse,
+  settingsPickerResponse,
   userLookupFormResponse,
   verifyFormResponse,
 } from '../formDefinitions.js';
@@ -96,7 +96,7 @@ menu.post('/verify-fundraiser', async (c) => {
  * without leaving Reddit and without a redeploy.
  */
 menu.post('/settings', async (c) => {
-  const { log, settings, gate, reddit } = getContainer();
+  const { log, settings, gate } = getContainer();
 
   try {
     const username = await gate.actingUsername();
@@ -106,12 +106,11 @@ menu.post('/settings', async (c) => {
       });
     }
 
-    const [current, flairs] = await Promise.all([settings.get(), reddit.getPostFlairs()]);
-    log.info('settings opened', {
-      fundraiserFlair: current.fundraiserFlairText || '(any post)',
-      flairs: flairs.map((flair) => flair.text).join(' | '),
-    });
-    return c.json<UiResponse>(settingsFormResponse(current, flairs));
+    // Step 1 of 2: a one-field picker. The section itself opens from the
+    // picker's submit, so no single form is ever too big for the mobile app.
+    const current = await settings.get();
+    log.info('settings opened', { fundraiserFlair: current.fundraiserFlairText || '(any post)' });
+    return c.json<UiResponse>(settingsPickerResponse(current));
   } catch (error) {
     log.error('settings menu action failed', { reason: describeError(error) });
     return c.json<UiResponse>(UNEXPECTED_ERROR);
@@ -136,7 +135,8 @@ menu.post('/notices', async (c) => {
       });
     }
 
-    return c.json<UiResponse>(noticesFormResponse(await settings.get()));
+    log.info('bot messages opened');
+    return c.json<UiResponse>(noticesPickerResponse(await settings.get()));
   } catch (error) {
     log.error('notices menu action failed', { reason: describeError(error) });
     return c.json<UiResponse>(UNEXPECTED_ERROR);
@@ -173,6 +173,7 @@ menu.post('/follow-up', async (c) => {
     }
 
     const state = await reminders.inspectFollowUp(postId);
+    log.info('follow-up opened', { postId, state: state.kind });
 
     switch (state.kind) {
       case 'no-record': {
@@ -347,7 +348,7 @@ menu.post('/poster-history', async (c) => {
 
     // A post made before matching existed has no fingerprint yet; this one is
     // taken on the spot so its matches show immediately.
-    const result = await history.rebuild(post.authorName, { ensureIndexed: postId });
+    const result = await history.open(post.authorName, { ensureIndexed: postId });
     log.info('poster history opened', { mod: username, kind: result.kind });
     return c.json<UiResponse>(historyResponse(result, post.authorName, reddit.subredditName()));
   } catch (error) {

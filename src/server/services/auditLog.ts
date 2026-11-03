@@ -111,31 +111,28 @@ export function cell(value: string): string {
   return value.replace(/\|/gu, '\\|').replace(/[\r\n]+/gu, ' ').trim();
 }
 
-function checklistCell(record: VerificationRecord): string {
+/**
+ * The checklist in a few characters: "6/6 ✓", or the count and what was NOT
+ * ticked - the part a moderator reading the log on a phone actually needs.
+ */
+export function checklistSummary(record: VerificationRecord): string {
   if (!record.checklist || record.checklist.length === 0) return 'not used';
 
-  const ticked = record.checklist.filter((item) => item.checked);
-  if (ticked.length === 0) return `0/${record.checklist.length}`;
-
-  return `${ticked.length}/${record.checklist.length}: ${ticked
-    .map((item) => item.label)
-    .join('; ')}`;
+  const total = record.checklist.length;
+  const missing = record.checklist.filter((item) => !item.checked);
+  if (missing.length === 0) return `${total}/${total} ✓`;
+  return `${total - missing.length}/${total} · missing: ${missing.map((item) => item.label).join('; ')}`;
 }
 
 /** The header a freshly created monthly page starts with. */
 export function auditPageHeader(subredditName: string, basePage?: string): string {
   return [
-    `# Fundraiser verification log - r/${subredditName}`,
+    `# Fundraiser verifications - r/${subredditName}`,
     '',
-    'Written automatically by the mod team bot, one row per verified fundraiser.',
-    ...(basePage ? [`[All months and poster history pages](${wikiPageUrl(subredditName, basePage)})`] : []),
+    ...(basePage ? [`[All months and poster pages](${wikiPageUrl(subredditName, basePage)})`, ''] : []),
+    'Moderators only. If you can read this and are not a moderator here, tell the mod team.',
     '',
-    'This page is restricted to moderators. If you can read it without being a',
-    'moderator of this community, please tell the mod team: the bot refuses to',
-    'write to it unless it can confirm the restriction, so something is wrong.',
-    '',
-    AUDIT_TABLE_HEADER,
-    AUDIT_TABLE_RULE,
+    '---',
   ].join('\n');
 }
 
@@ -225,6 +222,23 @@ export function withStatus(
   onlyIfMissing = false,
 ): string | null {
   const lines = content.split('\n');
+
+  // An entry in the list format: its Status line follows its heading.
+  const heading = lines.findIndex((line) => line.startsWith('**') && line.includes(`\`${postId}\``));
+  if (heading >= 0) {
+    for (let at = heading + 1; at < lines.length && (lines[at] ?? '').startsWith('- '); at++) {
+      const line = lines[at] ?? '';
+      if (!line.startsWith(STATUS_PREFIX)) continue;
+      if (onlyIfMissing && line.slice(STATUS_PREFIX.length).trim().length > 0) return null;
+      const updated = `${STATUS_PREFIX}${cell(status)}`;
+      if (updated === line) return null;
+      lines[at] = updated;
+      return lines.join('\n');
+    }
+    return null;
+  }
+
+  // A row in the table format pages used before the list format.
   const index = lines.findIndex((line) => line.startsWith('|') && line.includes(`[${postId}](`));
   if (index < 0) return null;
 
@@ -267,19 +281,24 @@ export function auditRow(record: VerificationRecord, subredditName: string): str
   );
   const link = `https://www.reddit.com/r/${subredditName}/comments/${record.postId.replace('t3_', '')}/`;
 
-  const cells = [
-    cell(when),
-    `[${cell(record.postId)}](${link})`,
-    cell(record.authorName ? `u/${record.authorName}` : '[deleted]'),
-    cell(`u/${record.modName}`),
-    cell(checklistCell(record)),
-    cell(record.templateLabel ?? 'default'),
-    cell(record.note.length > 0 ? record.note : '-'),
-    // Verifying approves the post, so it starts out up.
-    'up',
+  // A short stack of lines rather than a table row: an eight-column table is
+  // unreadable on a phone, while lines simply wrap. The post id appears once,
+  // in backticks, which is what `withStatus` and the duplicate guard find.
+  const lines = [
+    '',
+    `**${when}** · [open post](${link}) \`${record.postId}\``,
+    `- ${record.authorName ? `u/${record.authorName}` : '[deleted]'} · verified by u/${record.modName}`,
+    `- Checklist ${cell(checklistSummary(record))}`,
   ];
-  return `| ${cells.join(' | ')} |`;
+  if (record.note.length > 0) lines.push(`- Note: ${cell(record.note)}`);
+  if (record.templateLabel) lines.push(`- Notice: ${cell(record.templateLabel)}`);
+  // Verifying approves the post, so it starts out up.
+  lines.push(`${STATUS_PREFIX}up`);
+  return lines.join('\n');
 }
+
+/** The line `withStatus` rewrites in a list-format entry. */
+const STATUS_PREFIX = '- Status: ';
 
 export function createAuditLogService(deps: AuditLogDeps): AuditLogService {
   const { reddit, redis, settings, log, now } = deps;

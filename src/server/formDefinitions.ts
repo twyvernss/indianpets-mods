@@ -142,87 +142,167 @@ export function verifyFormResponse(input: {
 /** How many saved notices the editor offers. Matches CONFIG.maxMessageTemplates. */
 export const NOTICE_SLOTS = CONFIG.maxMessageTemplates;
 
-/** Field names for slot `index`, shared by the form and its submit handler. */
-export function noticeFieldNames(index: number): { title: string; body: string } {
-  return { title: `notice${index}Title`, body: `notice${index}Body` };
+/**
+ * The two editors - settings and bot messages - open in two steps: first a
+ * one-field picker, then a small form for just the part picked.
+ *
+ * WHY: they used to be single forms of 30 fields and 14 large prefilled text
+ * boxes. The Reddit mobile app received them (the server logged every open)
+ * but did not display them. Small forms are what the mobile client renders
+ * reliably - the verify form, which always worked on a phone, is one.
+ */
+export const PICK_FIELD = 'pick';
+
+/** Reads a select's value, which arrives as a one-element array. */
+export function pickedValue(raw: unknown): string {
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return typeof value === 'string' ? value : '';
 }
 
-/**
- * The verification-notice editor, on its own menu action.
- *
- * Previously these lived in the settings form as a single textarea holding
- * every notice separated by `---`. That was unreadable on a phone and required
- * learning a separator syntax to add a second message. Numbered title/message
- * pairs need no syntax at all, and splitting them out keeps the settings form
- * small enough for the mobile client to open promptly.
- */
-export function noticesFormResponse(current: AppSettings): UiResponse {
-  const slots: FormField[] = [];
+/* ---------------------------------------------------------------------- */
+/* Bot messages                                                            */
+/* ---------------------------------------------------------------------- */
 
-  for (let index = 0; index < NOTICE_SLOTS; index++) {
-    const names = noticeFieldNames(index);
-    const saved = current.messageTemplates[index];
+/** Which message is being edited. `saved0`..`saved4` are the saved notices. */
+export type MessageChoice = 'default' | 'automod' | 'reminder' | `saved${number}`;
 
-    slots.push(
-      {
-        type: 'string',
-        name: names.title,
-        label: `Notice ${index + 1} - title`,
-        helpText:
-          index === 0
-            ? 'Shown in the dropdown when verifying. Leave the title blank to remove a notice.'
-            : undefined,
-        defaultValue: saved?.label ?? '',
+export function isMessageChoice(value: string): value is MessageChoice {
+  if (value === 'default' || value === 'automod' || value === 'reminder') return true;
+  const match = /^saved(\d)$/u.exec(value);
+  return match !== null && Number(match[1]) < NOTICE_SLOTS;
+}
+
+/** Step 1: which message to edit. Saved notices are listed by their titles. */
+export function noticesPickerResponse(current: AppSettings): UiResponse {
+  const saved = Array.from({ length: NOTICE_SLOTS }, (_, index) => {
+    const notice = current.messageTemplates[index];
+    return {
+      label: notice ? `Saved notice ${index + 1}: ${notice.label}` : `Saved notice ${index + 1} (empty)`,
+      value: `saved${index}`,
+    };
+  });
+
+  return {
+    showForm: {
+      name: 'noticesPickerForm',
+      form: {
+        title: 'Edit bot messages',
+        description: 'Pick the message to edit.',
+        acceptLabel: 'Open',
+        cancelLabel: 'Cancel',
+        fields: [
+          {
+            type: 'select',
+            name: PICK_FIELD,
+            label: 'Message',
+            options: [
+              { label: 'Default verification notice', value: 'default' },
+              ...saved,
+              { label: 'Reply when AutoModerator holds a fundraiser', value: 'automod' },
+              { label: 'Asking the OP for an update', value: 'reminder' },
+            ],
+            defaultValue: ['default'],
+            required: true,
+          },
+        ],
       },
-      {
-        type: 'paragraph',
-        name: names.body,
-        label: `Notice ${index + 1} - message`,
-        lineHeight: 6,
-        defaultValue: saved?.body ?? '',
-      },
-    );
-  }
+    },
+  };
+}
+
+/** Step 2: one message, prefilled with exactly what the bot posts now. */
+export function noticeEditorResponse(current: AppSettings, choice: MessageChoice): UiResponse {
+  const savedIndex = choice.startsWith('saved') ? Number(choice.slice(5)) : -1;
+  const notice = savedIndex >= 0 ? current.messageTemplates[savedIndex] : undefined;
+
+  const fields: FormField[] =
+    savedIndex >= 0
+      ? [
+          {
+            type: 'string',
+            name: 'title',
+            label: 'Title (shown when verifying)',
+            helpText: 'Clear the title to delete this notice.',
+            defaultValue: notice?.label ?? '',
+          },
+          { type: 'paragraph', name: 'body', label: 'Message', lineHeight: 6, defaultValue: notice?.body ?? '' },
+        ]
+      : [
+          {
+            type: 'paragraph',
+            name: 'body',
+            label: 'Message',
+            helpText:
+              choice === 'default'
+                ? 'Clear to use the built-in text. Keep "not a guarantee" and "donate at your own discretion".'
+                : choice === 'automod'
+                  ? 'Clear to use the built-in text. Placeholders: {subreddit}, {op}.'
+                  : 'Clear to use the built-in text. Placeholders: {subreddit}, {op}, {days}, {grace}.',
+            lineHeight: 8,
+            defaultValue:
+              choice === 'default'
+                ? current.customNoticeText || DEFAULT_NOTICE_TEMPLATE
+                : choice === 'automod'
+                  ? current.automodReplyText || DEFAULT_INTAKE_TEMPLATE
+                  : current.customReminderText || DEFAULT_REMINDER_TEMPLATE,
+          },
+        ];
+
+  const title =
+    savedIndex >= 0
+      ? `Saved notice ${savedIndex + 1}`
+      : choice === 'default'
+        ? 'Default verification notice'
+        : choice === 'automod'
+          ? 'AutoModerator hold reply'
+          : 'Update request';
 
   return {
     showForm: {
       name: 'noticesForm',
+      form: { title, acceptLabel: 'Save', cancelLabel: 'Cancel', fields },
+      data: { choice },
+    },
+  };
+}
+
+/* ---------------------------------------------------------------------- */
+/* Settings                                                                */
+/* ---------------------------------------------------------------------- */
+
+export const SETTINGS_SECTIONS = [
+  { value: 'fundraisers', label: 'Fundraiser flair and rules' },
+  { value: 'verify', label: 'Verifying' },
+  { value: 'reminders', label: 'Follow-up reminders' },
+  { value: 'detection', label: 'Duplicate links and alt accounts' },
+  { value: 'wiki', label: 'Wiki log and history pages' },
+  { value: 'reset', label: 'Reset to the app defaults' },
+] as const;
+
+export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]['value'];
+
+export function isSettingsSection(value: string): value is SettingsSection {
+  return SETTINGS_SECTIONS.some((section) => section.value === value);
+}
+
+/** Step 1: which section to change. */
+export function settingsPickerResponse(current: AppSettings): UiResponse {
+  return {
+    showForm: {
+      name: 'settingsPickerForm',
       form: {
-        title: 'Bot messages',
-        description:
-          'Everything the bot says, in one place. A saved notice needs both a title and a message to appear in the dropdown when verifying.',
-        acceptLabel: 'Save',
+        title: 'Fundraiser tools settings',
+        description: current.enabled ? 'Pick what to change.' : 'The app is switched OFF. Pick what to change.',
+        acceptLabel: 'Open',
         cancelLabel: 'Cancel',
         fields: [
           {
-            type: 'paragraph',
-            name: 'customNoticeText',
-            label: 'Default notice (used when no saved notice is picked)',
-            helpText:
-              'This is the exact wording being posted now. Clear the box to go back to the built-in text. Keep the "not a guarantee" and "donate at your own discretion" language.',
-            lineHeight: 8,
-            defaultValue: current.customNoticeText || DEFAULT_NOTICE_TEMPLATE,
-          },
-          ...slots,
-          {
-            type: 'paragraph',
-            name: 'automodReplyText',
-            label: 'Message when AutoModerator holds a fundraiser',
-            helpText:
-              'Only posted if that feature is switched on in settings. Clear the box to go back to the built-in text. Placeholders: {subreddit}, {op}.',
-            lineHeight: 8,
-            // Prefilled with the real wording rather than left blank: an empty
-            // box tells a moderator nothing about what the bot would say.
-            defaultValue: current.automodReplyText || DEFAULT_INTAKE_TEMPLATE,
-          },
-          {
-            type: 'paragraph',
-            name: 'customReminderText',
-            label: 'Message asking the OP for an update on an old fundraiser',
-            helpText:
-              'Clear the box to go back to the built-in text. Placeholders: {subreddit}, {op}, {days}, {grace}.',
-            lineHeight: 8,
-            defaultValue: current.customReminderText || DEFAULT_REMINDER_TEMPLATE,
+            type: 'select',
+            name: PICK_FIELD,
+            label: 'Section',
+            options: SETTINGS_SECTIONS.map((section) => ({ label: section.label, value: section.value })),
+            defaultValue: ['fundraisers'],
+            required: true,
           },
         ],
       },
@@ -231,29 +311,260 @@ export function noticesFormResponse(current: AppSettings): UiResponse {
 }
 
 /**
- * The in-subreddit settings editor.
- *
- * Pre-filled with the EFFECTIVE values, so what a moderator sees is what the app
- * is currently doing, whatever layer it came from. Submitting writes a runtime
- * override that takes effect on the next action - no trip to
- * developers.reddit.com, no redeploy.
+ * Step 2: the fields of one section, prefilled with the EFFECTIVE values, so
+ * what a moderator sees is what the app is currently doing. Saving writes a
+ * runtime override for those fields only; the next action respects it.
  */
 export function settingsFormResponse(
   current: AppSettings,
   /** The subreddit's live post flairs. Empty on a sub with none, e.g. a test sub. */
   availableFlairs: readonly { id: string; text: string }[] = [],
+  section: SettingsSection = 'fundraisers',
 ): UiResponse {
+  const label = SETTINGS_SECTIONS.find((entry) => entry.value === section)?.label ?? 'Settings';
+  return {
+    showForm: {
+      name: 'settingsForm',
+      form: {
+        title: label,
+        acceptLabel: 'Save',
+        cancelLabel: 'Cancel',
+        fields: settingsSectionFields(current, availableFlairs, section),
+      },
+      data: { section },
+    },
+  };
+}
+
+function settingsSectionFields(
+  current: AppSettings,
+  availableFlairs: readonly { id: string; text: string }[],
+  section: SettingsSection,
+): FormField[] {
   const { reminders } = CONFIG;
 
-  // A dropdown of the subreddit's real flairs when there are any; a plain text
-  // box otherwise, so a brand new test subreddit is not stuck with an empty
-  // menu and no way to type a value.
-  // The saved value is trimmed text and is matched loosely (see
-  // `matchesFundraiserFlair`), but a select only shows a value that equals one
-  // option exactly. So the option is found the same loose way; a saved value
-  // matching no current flair is offered as its own option. Either way the
-  // menu shows what the filter is really doing instead of looking unset.
+  switch (section) {
+    case 'fundraisers':
+      return [
+        {
+          type: 'boolean',
+          name: 'enabled',
+          label: 'App enabled',
+          helpText: 'Master switch. Off stops every automatic action.',
+          defaultValue: current.enabled,
+        },
+        flairField(current, availableFlairs),
+        {
+          type: 'boolean',
+          name: 'reportMisflairedFundraisers',
+          label: 'Report fundraisers posted under another flair',
+          helpText: 'Donation link, UPI ID, bank account, or words like "donate", "vet bill", "GPay". Never removes.',
+          defaultValue: current.reportMisflairedFundraisers,
+        },
+        {
+          type: 'number',
+          name: 'fundraiserLimitHours',
+          label: 'Hours between fundraisers from one person',
+          helpText: 'A second one sooner is reported, never removed. 0 = no limit.',
+          defaultValue: current.fundraiserLimitHours,
+        },
+      ];
+
+    case 'verify':
+      return [
+        {
+          type: 'boolean',
+          name: 'showVerifyingModInComment',
+          label: 'Name the verifying mod in the public comment',
+          helpText: 'Not recommended: it brings mods unsolicited DMs.',
+          defaultValue: current.showVerifyingModInComment,
+        },
+        {
+          type: 'boolean',
+          name: 'compactChecklist',
+          label: 'Compact checklist (one tick-list)',
+          defaultValue: current.compactChecklist,
+        },
+        {
+          type: 'paragraph',
+          name: 'checklistItems',
+          label: 'Checklist items, one per line',
+          helpText: `Blank = built-in list. Up to ${CONFIG.maxChecklistItems}.`,
+          lineHeight: 6,
+          defaultValue: checklistItemsToText(current.checklistItems),
+        },
+        {
+          type: 'boolean',
+          name: 'showAuthorSummary',
+          label: "Show the author's history on the verify form",
+          defaultValue: current.showAuthorSummary,
+        },
+        {
+          type: 'boolean',
+          name: 'automodReplyEnabled',
+          label: 'Reply to the OP listing the documents we need',
+          helpText: 'When AutoModerator holds a fundraiser. Off if AutoModerator already says this.',
+          defaultValue: current.automodReplyEnabled,
+        },
+      ];
+
+    case 'reminders':
+      return [
+        {
+          type: 'boolean',
+          name: 'staleRemindersEnabled',
+          label: 'Ask the OP for an update on old fundraisers',
+          defaultValue: current.staleRemindersEnabled,
+        },
+        {
+          type: 'number',
+          name: 'reminderDays',
+          label: 'Days after verifying before asking',
+          helpText: `${reminders.minReminderDays} to ${reminders.maxReminderDays}.`,
+          defaultValue: current.reminderDays,
+        },
+        {
+          type: 'number',
+          name: 'graceDays',
+          label: 'Days to wait before reporting to the modqueue',
+          helpText: `${reminders.minGraceDays} to ${reminders.maxGraceDays}.`,
+          defaultValue: current.graceDays,
+        },
+        {
+          type: 'boolean',
+          name: 'alwaysReportStale',
+          label: 'Report even if the OP replied',
+          defaultValue: current.alwaysReportStale,
+        },
+        {
+          type: 'boolean',
+          name: 'lockStalePosts',
+          label: 'Also lock the post when reporting it',
+          defaultValue: current.lockStalePosts,
+        },
+      ];
+
+    case 'detection':
+      return [
+        {
+          type: 'boolean',
+          name: 'duplicateDetectionEnabled',
+          label: 'Report repeated fundraiser links',
+          defaultValue: current.duplicateDetectionEnabled,
+        },
+        {
+          type: 'boolean',
+          name: 'reportSameAuthorReposts',
+          label: 'Also when the same person reposts their own link',
+          defaultValue: current.reportSameAuthorReposts,
+        },
+        {
+          type: 'number',
+          name: 'sameAuthorRepostHours',
+          label: 'Hours before someone may repost their own link',
+          helpText: '0 = any time. 8760 = never.',
+          defaultValue: current.sameAuthorRepostHours,
+        },
+        {
+          type: 'boolean',
+          name: 'altDetectionEnabled',
+          label: "Report posts that match another account's",
+          helpText: 'Same UPI ID, phone, bank account, link or wording. Says if that account is banned.',
+          defaultValue: current.altDetectionEnabled,
+        },
+        {
+          type: 'number',
+          name: 'altSimilarityPercent',
+          label: 'Wording match needed on its own (%)',
+          helpText: `${CONFIG.alt.minSimilarityPercent} to ${CONFIG.alt.maxSimilarityPercent}.`,
+          defaultValue: current.altSimilarityPercent,
+        },
+        {
+          type: 'number',
+          name: 'minAccountAgeDays',
+          label: 'Flag accounts younger than (days)',
+          helpText: 'Only adds a note to reports. 0 = off.',
+          defaultValue: current.minAccountAgeDays,
+        },
+        {
+          type: 'number',
+          name: 'minKarma',
+          label: 'Flag accounts with less karma than',
+          helpText: 'Only adds a note to reports. 0 = off.',
+          defaultValue: current.minKarma,
+        },
+        {
+          type: 'boolean',
+          name: 'scanCommentsForLinks',
+          label: 'Also scan comments for links (leave off)',
+          defaultValue: current.scanCommentsForLinks,
+        },
+      ];
+
+    case 'wiki':
+      return [
+        {
+          type: 'boolean',
+          name: 'wikiLogEnabled',
+          label: 'Keep the verification log on the wiki',
+          helpText: 'Moderator-only. History pages need it.',
+          defaultValue: current.wikiLogEnabled,
+        },
+        {
+          type: 'string',
+          name: 'wikiLogPage',
+          label: 'Wiki page',
+          defaultValue: current.wikiLogPage,
+        },
+        {
+          type: 'boolean',
+          name: 'userHistoryEnabled',
+          label: 'Keep a history page for each poster',
+          defaultValue: current.userHistoryEnabled,
+        },
+        {
+          type: 'boolean',
+          name: 'modmailLogEnabled',
+          label: 'Also post each verification to Mod Discussions',
+          defaultValue: current.modmailLogEnabled,
+        },
+      ];
+
+    case 'reset':
+      return [
+        {
+          type: 'boolean',
+          name: 'resetAll',
+          label: 'Yes, reset every setting to the app defaults',
+          helpText: 'Bot messages are reset too. Logs and records are kept.',
+          defaultValue: false,
+        },
+      ];
+  }
+}
+
+/**
+ * The fundraiser flair: a dropdown of the subreddit's real flairs when there
+ * are any, a text box otherwise.
+ *
+ * The saved value is matched loosely (see `matchesFundraiserFlair`), but a
+ * select only shows a value equal to one option exactly. So the option is
+ * found the same loose way, and a saved value matching no current flair is
+ * offered as its own option. Either way the menu shows what the filter is
+ * really doing instead of looking unset.
+ */
+function flairField(current: AppSettings, availableFlairs: readonly { id: string; text: string }[]): FormField {
   const saved = current.fundraiserFlairText;
+  if (availableFlairs.length === 0) {
+    return {
+      type: 'string',
+      name: 'fundraiserFlairText',
+      label: 'Flair text that marks a fundraiser',
+      helpText: 'This subreddit has no post flairs. Blank = every post.',
+      defaultValue: saved,
+    };
+  }
+
   const savedOption =
     saved.length === 0
       ? ANY_FLAIR
@@ -261,281 +572,16 @@ export function settingsFormResponse(
           availableFlairs.find((flair) => matchesFundraiserFlair(flair.text, saved)))?.text ?? saved;
   const savedIsListed = savedOption === ANY_FLAIR || availableFlairs.some((flair) => flair.text === savedOption);
 
-  const flairField: FormField =
-    availableFlairs.length > 0
-      ? {
-          type: 'select',
-          name: 'fundraiserFlairText',
-          label: 'Which flair marks a fundraiser?',
-          helpText:
-            'The bot only replies to and reports posts with this flair. Choose "Any post" to switch the filter off.',
-          options: [
-            { label: 'Any post (no flair filter)', value: ANY_FLAIR },
-            ...availableFlairs.map((flair) => ({ label: flair.text, value: flair.text })),
-            ...(savedIsListed ? [] : [{ label: `${savedOption} (saved, not a current flair)`, value: savedOption }]),
-          ],
-          defaultValue: [savedOption],
-        }
-      : {
-          type: 'string',
-          name: 'fundraiserFlairText',
-          label: 'Which flair marks a fundraiser?',
-          helpText:
-            'This subreddit has no post flairs yet, so type the flair text by hand. Leave blank to apply the bot to every post.',
-          defaultValue: current.fundraiserFlairText,
-        };
-
   return {
-    showForm: {
-      name: 'settingsForm',
-      form: {
-        title: 'Fundraiser tools settings',
-        description:
-          'Changes take effect immediately and apply to this subreddit only. The wording the bot posts is edited separately, under "Edit bot messages". Tick "Reset everything" at the bottom to go back to the app defaults.',
-        acceptLabel: 'Save',
-        cancelLabel: 'Cancel',
-        fields: [
-          {
-            type: 'boolean',
-            name: 'enabled',
-            label: 'App enabled',
-            helpText: 'Master switch. Turn off to stop every automated action at once.',
-            defaultValue: current.enabled,
-          },
-          {
-            type: 'group',
-            label: 'Verification',
-            fields: [
-              {
-                type: 'boolean',
-                name: 'showVerifyingModInComment',
-                label: 'Name the verifying moderator in the public comment',
-                helpText: 'Not recommended - this is what causes unsolicited DMs to moderators.',
-                defaultValue: current.showVerifyingModInComment,
-              },
-              {
-                type: 'boolean',
-                name: 'compactChecklist',
-                label: 'Compact checklist (one tick-list instead of a row of toggles)',
-                helpText: 'Keeps the verify form short, which matters most on mobile.',
-                defaultValue: current.compactChecklist,
-              },
-              {
-                type: 'paragraph',
-                name: 'checklistItems',
-                label: 'Checklist items, one per line',
-                helpText: `Leave blank for the built-in list. Maximum ${CONFIG.maxChecklistItems} items.`,
-                lineHeight: 6,
-                defaultValue: checklistItemsToText(current.checklistItems),
-              },
-              {
-                type: 'boolean',
-                name: 'showAuthorSummary',
-                label: "Show the author's history on the verify form",
-                helpText:
-                  'Account age, karma, and how many fundraisers they have had verified here before. Moderator-only.',
-                defaultValue: current.showAuthorSummary,
-              },
-            ],
-          },
-          {
-            type: 'group',
-            label: 'When AutoModerator holds a fundraiser',
-            fields: [
-              {
-                type: 'boolean',
-                name: 'automodReplyEnabled',
-                label: 'Reply to the OP listing the documents we need',
-                helpText:
-                  'Off by default. If AutoModerator already posts a similar comment, remove that one first - two bot comments on a post is worse than one.',
-                defaultValue: current.automodReplyEnabled,
-              },
-            ],
-          },
-          flairField,
-          {
-            type: 'group',
-            label: 'Fundraiser rules',
-            fields: [
-              {
-                type: 'number',
-                name: 'fundraiserLimitHours',
-                label: 'Hours between fundraisers from one person',
-                helpText:
-                  'A second fundraiser from the same person sooner than this is reported to the modqueue, e.g. "2nd fundraiser in 24h from u/name". Never removed. Counts posts under another flair too. 0 = no limit.',
-                defaultValue: current.fundraiserLimitHours,
-              },
-              {
-                type: 'boolean',
-                name: 'reportMisflairedFundraisers',
-                label: 'Report posts that look like a fundraiser but have another flair',
-                helpText:
-                  'Catches fundraisers posted as a normal flair to skip AutoModerator. Looks for a donation link (Ketto, Milaap...), a UPI ID or bank account, or two or more words like "donate", "vet bill", "GPay". Reports to the modqueue; never removes.',
-                defaultValue: current.reportMisflairedFundraisers,
-              },
-            ],
-          },
-          {
-            type: 'group',
-            label: 'Duplicate fundraiser links',
-            fields: [
-              {
-                type: 'boolean',
-                name: 'duplicateDetectionEnabled',
-                label: 'Detect repeated fundraiser links',
-                defaultValue: current.duplicateDetectionEnabled,
-              },
-              {
-                type: 'boolean',
-                name: 'reportSameAuthorReposts',
-                label: 'Also report when the same person reposts their own link',
-                defaultValue: current.reportSameAuthorReposts,
-              },
-              {
-                type: 'number',
-                name: 'sameAuthorRepostHours',
-                label: 'Hours before the same person may repost their own link',
-                helpText:
-                  'Match your subreddit rules. A repost that waits this long counts as legitimate and is never reported. 0 = no waiting period. If you do not allow reposts at all, set this very high (8760 = a year).',
-                defaultValue: current.sameAuthorRepostHours,
-              },
-              {
-                type: 'boolean',
-                name: 'scanCommentsForLinks',
-                label: 'Also scan comments for fundraiser links',
-                helpText: 'Off by default. Much more traffic for a comparatively rare signal.',
-                defaultValue: current.scanCommentsForLinks,
-              },
-            ],
-          },
-          {
-            type: 'group',
-            label: 'Wiki log (the permanent record)',
-            fields: [
-              {
-                type: 'boolean',
-                name: 'wikiLogEnabled',
-                label: 'Keep the verification log on the wiki',
-                helpText:
-                  'One row per verification: who verified it, when, the checklist and the mod note. Moderator-only, and it survives the app being removed. Poster history pages need this on.',
-                defaultValue: current.wikiLogEnabled,
-              },
-              {
-                type: 'string',
-                name: 'wikiLogPage',
-                label: 'Wiki page',
-                helpText:
-                  'Monthly pages go under it, and poster history pages under its users/ subpage.',
-                defaultValue: current.wikiLogPage,
-              },
-              {
-                type: 'boolean',
-                name: 'modmailLogEnabled',
-                label: 'Also post each verification to Mod Discussions',
-                helpText: 'Off by default. Useful if your team lives in modmail.',
-                defaultValue: current.modmailLogEnabled,
-              },
-            ],
-          },
-          {
-            type: 'group',
-            label: 'Alt accounts and ban evasion',
-            fields: [
-              {
-                type: 'boolean',
-                name: 'altDetectionEnabled',
-                label: "Report posts that match another account's",
-                helpText:
-                  'Compares each new post with every other account: same UPI ID, phone number, bank account, fundraiser link, or mostly the same wording. Says whether the matched account is banned here.',
-                defaultValue: current.altDetectionEnabled,
-              },
-              {
-                type: 'number',
-                name: 'altSimilarityPercent',
-                label: 'Wording match needed on its own (percent)',
-                helpText: `Between ${CONFIG.alt.minSimilarityPercent} and ${CONFIG.alt.maxSimilarityPercent}. Shared payment details always count, whatever this is set to.`,
-                defaultValue: current.altSimilarityPercent,
-              },
-              {
-                type: 'boolean',
-                name: 'userHistoryEnabled',
-                label: 'Keep a wiki history page for each poster',
-                helpText:
-                  'Moderator-only. Every post they made here with links, who verified each one, and which accounts they match.',
-                defaultValue: current.userHistoryEnabled,
-              },
-            ],
-          },
-          {
-            type: 'group',
-            label: 'Stale fundraiser reminders',
-            fields: [
-              {
-                type: 'boolean',
-                name: 'staleRemindersEnabled',
-                label: 'Ask the OP for an update on old fundraisers',
-                defaultValue: current.staleRemindersEnabled,
-              },
-              {
-                type: 'number',
-                name: 'reminderDays',
-                label: 'Days after verification before asking for an update',
-                helpText: `Between ${reminders.minReminderDays} and ${reminders.maxReminderDays}.`,
-                defaultValue: current.reminderDays,
-              },
-              {
-                type: 'number',
-                name: 'graceDays',
-                label: 'Days to wait for a reply before reporting to the modqueue',
-                helpText: `Between ${reminders.minGraceDays} and ${reminders.maxGraceDays}.`,
-                defaultValue: current.graceDays,
-              },
-              {
-                type: 'boolean',
-                name: 'alwaysReportStale',
-                label: 'Report even if the OP replied',
-                helpText: 'On by default. A reply is not always a real answer.',
-                defaultValue: current.alwaysReportStale,
-              },
-              {
-                type: 'boolean',
-                name: 'lockStalePosts',
-                label: 'Also lock the post when reporting it',
-                helpText: 'Off by default.',
-                defaultValue: current.lockStalePosts,
-              },
-            ],
-          },
-          {
-            type: 'group',
-            label: 'Author thresholds (used to annotate modqueue reports)',
-            fields: [
-              {
-                type: 'number',
-                name: 'minAccountAgeDays',
-                label: 'Minimum account age in days',
-                helpText: '0 disables this annotation.',
-                defaultValue: current.minAccountAgeDays,
-              },
-              {
-                type: 'number',
-                name: 'minKarma',
-                label: 'Minimum combined karma',
-                helpText: '0 disables this annotation.',
-                defaultValue: current.minKarma,
-              },
-            ],
-          },
-          {
-            type: 'boolean',
-            name: 'resetAll',
-            label: 'Reset everything to the app defaults',
-            helpText: 'When ticked, every other field on this form is ignored.',
-            defaultValue: false,
-          },
-        ],
-      },
-    },
+    type: 'select',
+    name: 'fundraiserFlairText',
+    label: 'Which flair marks a fundraiser?',
+    options: [
+      { label: 'Any post (no flair filter)', value: ANY_FLAIR },
+      ...availableFlairs.map((flair) => ({ label: flair.text, value: flair.text })),
+      ...(savedIsListed ? [] : [{ label: `${savedOption} (saved, not a current flair)`, value: savedOption }]),
+    ],
+    defaultValue: [savedOption],
   };
 }
 

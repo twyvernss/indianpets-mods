@@ -138,6 +138,7 @@ export function getContainer(): Container {
   const history = createUserHistoryService({
     reddit,
     redis: redisPort,
+    scheduler,
     repo,
     alt,
     settings,

@@ -14,6 +14,7 @@ import {
   DEFAULT_SETTINGS,
   matchesFundraiserFlair,
   normaliseFlair,
+  OVERRIDABLE_KEYS,
   messageTemplatesToText,
   parseChecklistItems,
   parseMessageTemplates,
@@ -21,7 +22,12 @@ import {
   sanitiseWikiPageName,
   TEMPLATE_SEPARATOR,
 } from '../settings.js';
-import { settingsFormResponse } from '../formDefinitions.js';
+import {
+  isMessageChoice,
+  noticeEditorResponse,
+  SETTINGS_SECTIONS,
+  settingsFormResponse,
+} from '../formDefinitions.js';
 import {
   buildReminderComment,
   buildVerificationComment,
@@ -831,5 +837,50 @@ describe('settings form flair menu', () => {
 
   it('shows "Any post" when no flair is saved', () => {
     expect(flairMenu('', [{ id: 'a', text: 'Funraiser' }]).defaultValue).toEqual([ANY_FLAIR]);
+  });
+});
+
+describe('mobile-sized editors', () => {
+  type Field = { type?: string; name?: string; defaultValue?: unknown };
+  const fieldsOf = (response: ReturnType<typeof settingsFormResponse>): Field[] =>
+    (response.showForm?.form.fields ?? []) as Field[];
+
+  it('splits settings into sections of at most eight flat fields, covering every setting', () => {
+    const seen = new Set<string>();
+    for (const section of SETTINGS_SECTIONS) {
+      const fields = fieldsOf(settingsFormResponse(DEFAULT_SETTINGS, [{ id: 'a', text: 'Fundraiser' }], section.value));
+      expect(fields.length).toBeLessThanOrEqual(8);
+      expect(fields.some((field) => field.type === 'group')).toBe(false);
+      for (const field of fields) if (field.name) seen.add(field.name);
+    }
+    for (const key of OVERRIDABLE_KEYS) {
+      if (key === 'customNoticeText' || key === 'messageTemplates' || key === 'automodReplyText' || key === 'customReminderText') {
+        continue; // edited under "Edit bot messages"
+      }
+      expect(seen.has(key)).toBe(true);
+    }
+  });
+
+  it('opens one message at a time, prefilled with what the bot posts now', () => {
+    const notice = noticeEditorResponse(DEFAULT_SETTINGS, 'default');
+    const fields = (notice.showForm?.form.fields ?? []) as Field[];
+    expect(fields).toHaveLength(1);
+    expect(String(fields[0]?.defaultValue)).toContain('not a guarantee');
+    expect(notice.showForm?.data).toEqual({ choice: 'default' });
+
+    const saved = noticeEditorResponse(
+      { ...DEFAULT_SETTINGS, messageTemplates: [{ id: 'tpl0', label: 'Clinic', body: 'Checked with the clinic.' }] },
+      'saved0',
+    );
+    expect(((saved.showForm?.form.fields ?? []) as Field[]).map((field) => field.defaultValue)).toEqual([
+      'Clinic',
+      'Checked with the clinic.',
+    ]);
+  });
+
+  it('accepts only real message choices', () => {
+    expect(isMessageChoice('saved4')).toBe(true);
+    expect(isMessageChoice('saved9')).toBe(false);
+    expect(isMessageChoice('anything')).toBe(false);
   });
 });
