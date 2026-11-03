@@ -28,6 +28,13 @@ import { historyResponse, UNEXPECTED_ERROR } from './responses.js';
 
 export const menu = new Hono();
 
+// Every tap is logged on arrival. A menu item the mobile app shows but never
+// sends is otherwise invisible: no handler runs, so nothing else is logged.
+menu.use('*', async (c, next) => {
+  getContainer().log.info('menu tapped', { path: c.req.path });
+  await next();
+});
+
 /**
  * "Verify fundraiser".
  *
@@ -153,7 +160,10 @@ menu.post('/notices', async (c) => {
  * Nothing is written here: the action happens on submit, so a moderator who
  * opens this and cancels has changed nothing.
  */
-menu.post('/follow-up', async (c) => {
+// `/verification-status` was the address of the old "Fundraiser verification
+// status" item, merged into this one. A phone that cached the old menu still
+// sends it there, so it is answered the same way rather than silently failing.
+menu.on('POST', ['/follow-up', '/verification-status'], async (c) => {
   const { log, reminders, gate, tokens, verification } = getContainer();
 
   try {

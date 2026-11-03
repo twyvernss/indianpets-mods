@@ -446,3 +446,16 @@ jobs.post('/log-status', async (c) => {
 
   return c.json<TaskResponse>({}, 200);
 });
+
+/** Rewrites every month's wiki log page in the current layout. Queued on upgrade. */
+jobs.post('/log-migrate', async (c) => {
+  const { log, audit } = getContainer();
+
+  try {
+    await audit.migratePages();
+  } catch (error) {
+    log.error('wiki log migration failed', { reason: describeError(error) });
+  }
+
+  return c.json<TaskResponse>({}, 200);
+});

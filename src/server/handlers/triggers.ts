@@ -284,6 +284,12 @@ async function queueBackfills(reason: string): Promise<void> {
     data: { offset: 0, batchIndex: 0 },
     runAt: new Date(Date.now() + 60_000),
   });
+  // Rewrites pages written in an older layout, before the backfill adds to them.
+  await scheduler.runJob({
+    name: JOBS.logMigrate,
+    data: {},
+    runAt: new Date(Date.now() + 20_000),
+  });
   log.info('queued author history, fingerprint and wiki log backfills', { reason });
 }
 

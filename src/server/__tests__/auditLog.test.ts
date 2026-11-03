@@ -97,29 +97,37 @@ describe('row rendering', () => {
     expect(row.endsWith('- Status: up')).toBe(true);
   });
 
-  it('widens a seven-column page to add Status, and drops the old "notes not included" line', () => {
-    const legacy = [
-      'Written automatically. Moderator notes are deliberately not included here.',
-      '| Verified (IST) | Post | Fundraiser by | Verified by | Checklist | Notice | Mod note |',
-      '| --- | --- | --- | --- | --- | --- | --- |',
-    ].join('\n');
-    const upgraded = upgradeAuditHeader(legacy);
-    expect(upgraded).toContain('| Mod note | Status |');
-    expect(upgraded).not.toContain('deliberately not included');
-  });
-
-  it('widens a page started before the note column existed', () => {
+  it('turns old table rows into short entries, keeping only the checklist count', () => {
     const legacy = [
       '# log',
+      'Written automatically by the mod team bot, one row per verified fundraiser.',
+      'Moderator notes are deliberately not included here.',
+      '| Verified (IST) | Post | Fundraiser by | Verified by | Checklist | Notice | Mod note | Status |',
+      '| --- | --- | --- | --- | --- | --- | --- | --- |',
+      '| 28 Sep 2026, 16:43 IST | [t3_abc](https://www.reddit.com/r/x/comments/abc/) | u/op | u/mod | 3/6: Vet bill; Clinic; Photo | default | hello | removed, 3 Nov 2026 |',
+    ].join('\n');
+
+    const upgraded = upgradeAuditHeader(legacy);
+    expect(upgraded).not.toContain('|');
+    expect(upgraded).not.toContain('deliberately not included');
+    expect(upgraded).toContain('**28 Sep 2026, 16:43 IST** · [open post](https://www.reddit.com/r/x/comments/abc/) `t3_abc`');
+    expect(upgraded).toContain('- u/op · verified by u/mod');
+    expect(upgraded).toContain('- Checklist 3/6');
+    expect(upgraded).not.toContain('Vet bill');
+    expect(upgraded).toContain('- Note: hello');
+    expect(upgraded).toContain('- Status: removed, 3 Nov 2026');
+    expect(upgradeAuditHeader(upgraded)).toBe(upgraded);
+  });
+
+  it('converts the oldest six-column rows too, leaving their status empty to be filled in', () => {
+    const legacy = [
       '| Verified (IST) | Post | Fundraiser by | Verified by | Checklist | Notice |',
       '| --- | --- | --- | --- | --- | --- |',
-      '| a | b | c | d | e | f |',
+      '| 1 Sep 2026, 10:00 IST | [t3_old](https://r/old/) | [deleted] | u/mod | not used | default |',
     ].join('\n');
     const upgraded = upgradeAuditHeader(legacy);
-    expect(upgraded).toContain('| Notice | Mod note |');
-    expect(upgraded).toContain('| --- | --- | --- | --- | --- | --- | --- |');
-    expect(upgraded).toContain('| a | b | c | d | e | f |');
-    expect(upgradeAuditHeader(upgraded)).toBe(upgraded);
+    expect(upgraded).toContain('- Checklist not used');
+    expect(withStatus(upgraded, 't3_old', 'up', true)).toContain('- Status: up');
   });
 
   it('sets the status of one row and leaves the others alone', () => {

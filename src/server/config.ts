@@ -220,6 +220,8 @@ export const JOBS = {
   auditBackfill: 'audit-backfill',
   /** Updates a verified post's Status cell in the wiki log. */
   logStatus: 'log-status',
+  /** Rewrites old wiki log pages in the current, phone-friendly format. */
+  logMigrate: 'log-migrate',
   /** Fingerprints a new post and reports it if it looks like another account's. */
   altCheck: 'alt-check',
   /** Fingerprints recent posts so matching has history to compare against. */

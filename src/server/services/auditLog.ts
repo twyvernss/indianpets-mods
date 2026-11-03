@@ -50,6 +50,12 @@ export type AuditLogService = {
   loggedAmong(postIds: readonly T3[]): Promise<Set<T3>>;
 
   /**
+   * Rewrites every month's page in the current format (old table rows become
+   * list entries). Returns how many pages changed. Safe to repeat.
+   */
+  migratePages(): Promise<number>;
+
+  /**
    * Proves, on demand, that the wiki log is actually working.
    *
    * Runs exactly what a verification runs - this month's page name, the same
@@ -197,7 +203,40 @@ export function upgradeAuditHeader(content: string): string {
       upgraded = upgraded.replace(legacy, `${AUDIT_TABLE_HEADER}\n${AUDIT_TABLE_RULE}`);
     }
   }
-  return upgraded;
+  return tableRowsToEntries(upgraded);
+}
+
+/**
+ * Rewrites a page's table rows - the format before the list format - as list
+ * entries, so a month's page reads the same on a phone from top to bottom.
+ *
+ * The old checklist cell named every ticked item, which is what made rows
+ * tall; only its count ("3/6") is kept. A row it cannot read is left as it is.
+ */
+export function tableRowsToEntries(content: string): string {
+  if (!content.includes('| Verified (IST) |')) return content;
+
+  const out: string[] = [];
+  for (const line of content.split('\n')) {
+    if (line.startsWith('| Verified (IST) |') || /^\|(?:\s*---\s*\|)+\s*$/u.test(line)) continue;
+
+    const cells = line.startsWith('|') ? splitRow(line) : [];
+    const post = /^\[(t3_[a-z0-9]+)\]\(([^)]+)\)$/u.exec(cells[1] ?? '');
+    if (!post) {
+      out.push(line);
+      continue;
+    }
+
+    const [when, , author, mod, checklist, notice, note, status] = cells;
+    const ratio = (checklist ?? '').split(':')[0]?.trim() || 'not used';
+    out.push('', `**${when ?? ''}** · [open post](${post[2]}) \`${post[1]}\``, `- ${author ?? ''} · verified by ${mod ?? ''}`);
+    out.push(`- Checklist ${ratio}`);
+    if (note && note !== '-') out.push(`- Note: ${note}`);
+    if (notice && notice !== 'default') out.push(`- Notice: ${notice}`);
+    // Left as "- Status: " when the row had none, so the backfill can fill it.
+    out.push(`${STATUS_PREFIX}${status ?? ''}`);
+  }
+  return out.join('\n');
 }
 
 /** Splits a table row into cells, respecting escaped pipes. */
@@ -467,6 +506,33 @@ export function createAuditLogService(deps: AuditLogDeps): AuditLogService {
     },
 
     markLogged,
+
+    async migratePages(): Promise<number> {
+      const config = await settings.get();
+      if (!config.enabled || !config.wikiLogEnabled) return 0;
+
+      let changed = 0;
+      for (const page of await allByScore(redis, monthsKey)) {
+        if (!page.startsWith(`${config.wikiLogPage}/`)) continue;
+        const privacy = await reddit.ensureWikiPagePrivate(
+          page,
+          auditPageHeader(reddit.subredditName(), config.wikiLogPage),
+        );
+        if (!privacy.ok) continue;
+
+        const wrote = await withLock(async () => {
+          const existing = await reddit.readWikiPage(page);
+          if (existing === null) return false;
+          const migrated = upgradeAuditHeader(existing);
+          if (migrated === existing) return false;
+          await reddit.writeWikiPage(page, migrated, 'Shorter layout for phones');
+          return true;
+        });
+        if (wrote) changed += 1;
+      }
+      log.info('wiki log pages migrated', { changed });
+      return changed;
+    },
 
     async loggedAmong(postIds): Promise<Set<T3>> {
       if (postIds.length === 0) return new Set();

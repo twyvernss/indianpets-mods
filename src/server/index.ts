@@ -1,6 +1,7 @@
 import { serve } from '@hono/node-server';
 import { createServer, getServerPort } from '@devvit/web/server';
 import { Hono } from 'hono';
+import { getContainer } from './container.js';
 import { forms } from './handlers/forms.js';
 import { menu } from './handlers/menu.js';
 import { jobs } from './handlers/scheduler.js';
@@ -31,6 +32,19 @@ internal.route('/triggers', triggers);
 internal.route('/jobs', jobs);
 
 app.route('/internal', internal);
+
+// A request for an address this version does not have - typically a menu item
+// from an older version still cached on a phone. Logged, and answered with a
+// toast a moderator can act on instead of silence.
+app.notFound((c) => {
+  getContainer().log.warn('unknown endpoint', { path: c.req.path });
+  return c.json({
+    showToast: {
+      text: 'This menu item is out of date. Close and reopen the app, then try again.',
+      appearance: 'neutral',
+    },
+  });
+});
 
 serve({
   fetch: app.fetch,

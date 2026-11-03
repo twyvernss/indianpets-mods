@@ -643,16 +643,18 @@ export function userLookupFormResponse(): UiResponse {
       name: 'userLookupForm',
       form: {
         title: "Look up a poster's history",
+        // The menu cannot show a spinner, so the wait is said up front: the
+        // first lookup of a person builds their page and takes a few seconds.
         description:
-          'Builds their moderator-only wiki page: every post they made here with links, who verified each one, and which other accounts their posts match. Takes a few seconds.',
-        acceptLabel: 'Open history',
+          'After you tap Search, please wait 5-10 seconds while their history is gathered. The page opens by itself.',
+        acceptLabel: 'Search (takes a few seconds)',
         cancelLabel: 'Cancel',
         fields: [
           {
             type: 'string',
             name: LOOKUP_FIELD,
             label: 'Username',
-            helpText: 'With or without the u/.',
+            helpText: 'With or without the u/. Tap Search once and wait - tapping again starts over.',
             required: true,
           },
         ],

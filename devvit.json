@@ -144,6 +144,9 @@
       },
       "log-status": {
         "endpoint": "/internal/jobs/log-status"
+      },
+      "log-migrate": {
+        "endpoint": "/internal/jobs/log-migrate"
       }
     }
   },
