@@ -7,7 +7,7 @@ import type { SettingsReader } from '../settings.js';
 import { describeMatch } from '../text.js';
 import type { VerificationRecord } from '../types.js';
 import type { AccountMatch, AltService } from './altMatch.js';
-import { cell } from './auditLog.js';
+import { cell, wikiPageUrl } from './auditLog.js';
 import type { AuthorSnapshot, RedditPort, UserPostSummary } from './redditPort.js';
 
 /**
@@ -196,8 +196,9 @@ export function createUserHistoryService(deps: UserHistoryDeps): UserHistoryServ
     }
 
     const existing = (await reddit.readWikiPage(indexPage)) ?? header;
-    const link = `https://www.reddit.com/r/${reddit.subredditName()}/wiki/${page}`;
-    if (existing.includes(link)) return;
+    // Matched on the path, so entries written with an older link style still count.
+    if (existing.includes(`/wiki/${page})`)) return;
+    const link = wikiPageUrl(reddit.subredditName(), page);
     await reddit.writeWikiPage(indexPage, `${existing}\n- [u/${username}](${link})`, `Add u/${username}`);
   }
 

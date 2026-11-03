@@ -61,6 +61,17 @@ export type AuditLogDeps = {
   now: () => number;
 };
 
+/**
+ * Where a moderator should open a wiki page: on old.reddit.
+ *
+ * New Reddit's wiki view says "does not exist" for pages it will not render -
+ * moderator-only pages, and every page on a subreddit whose wiki is switched
+ * off - even when the page is there. old.reddit shows them to moderators.
+ */
+export function wikiPageUrl(subredditName: string, page: string): string {
+  return `https://old.reddit.com/r/${subredditName}/wiki/${page}`;
+}
+
 /** Page names rotate monthly so no single page approaches Reddit's size cap. */
 export function auditPageName(basePage: string, epochMs: number): string {
   const shifted = new Date(epochMs + CONFIG.displayTimeZoneOffsetMinutes * 60_000);

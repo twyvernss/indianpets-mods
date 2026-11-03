@@ -1,4 +1,5 @@
 import type { UiResponse } from '@devvit/web/shared';
+import { wikiPageUrl } from '../services/auditLog.js';
 import type { HistoryResult } from '../services/userHistory.js';
 import type { FollowUpResult } from '../services/reminders.js';
 import { formatVerifiedDate } from '../services/verification.js';
@@ -158,7 +159,7 @@ export function historyResponse(
           text: historyReadyToast({ username, postCount: result.postCount, top: result.top }),
           appearance: result.top?.banned ? 'neutral' : 'success',
         },
-        navigateTo: `https://www.reddit.com/r/${subredditName}/wiki/${result.page}`,
+        navigateTo: wikiPageUrl(subredditName, result.page),
       };
   }
 }

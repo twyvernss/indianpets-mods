@@ -10,6 +10,7 @@ import {
   verifyFormResponse,
 } from '../formDefinitions.js';
 import { describeError } from '../lib/logger.js';
+import { wikiPageUrl } from '../services/auditLog.js';
 import { formatVerifiedDate } from '../services/verification.js';
 import {
   alreadyVerifiedToast,
@@ -262,7 +263,7 @@ menu.post('/wiki-check', async (c) => {
         // the evidence. Both fields of UiResponse are independent.
         return c.json<UiResponse>({
           showToast: { text: wikiCheckReadyToast(result), appearance: 'success' },
-          navigateTo: `https://www.reddit.com/r/${reddit.subredditName()}/wiki/${result.page}`,
+          navigateTo: wikiPageUrl(reddit.subredditName(), result.page),
         });
     }
   } catch (error) {

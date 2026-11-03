@@ -136,6 +136,20 @@ describe('rebuild', () => {
     expect(index.split('u/op_user').length - 1).toBe(1);
   });
 
+  it('links the index to old.reddit, and does not re-add an entry written in the old style', async () => {
+    const h = harness();
+    h.reddit.wiki.set(
+      'fundraiser-verifications/users',
+      '# Poster history pages\n- [u/op_user](https://www.reddit.com/r/IndianPets/wiki/fundraiser-verifications/users/op_user)',
+    );
+    await h.service.rebuild('op_user');
+    await h.service.rebuild('someone_else');
+
+    const index = h.reddit.wiki.get('fundraiser-verifications/users') ?? '';
+    expect(index.split('u/op_user').length - 1).toBe(1);
+    expect(index).toContain('https://old.reddit.com/r/IndianPets/wiki/fundraiser-verifications/users/someone_else');
+  });
+
   it('writes nothing when the page cannot be proven moderator-only', async () => {
     const h = harness();
     h.reddit.wikiPrivate = false;
