@@ -341,6 +341,20 @@ export function settingsFormResponse(
           flairField,
           {
             type: 'group',
+            label: 'Fundraisers posted under another flair',
+            fields: [
+              {
+                type: 'boolean',
+                name: 'reportMisflairedFundraisers',
+                label: 'Report posts that look like a fundraiser but have another flair',
+                helpText:
+                  'Catches fundraisers posted as a normal flair to skip AutoModerator. Looks for a donation link (Ketto, Milaap...), a UPI ID or bank account, or two or more words like "donate", "vet bill", "GPay". Reports to the modqueue; never removes.',
+                defaultValue: current.reportMisflairedFundraisers,
+              },
+            ],
+          },
+          {
+            type: 'group',
             label: 'Duplicate fundraiser links',
             fields: [
               {

@@ -221,7 +221,7 @@ jobs.post('/audit-log', async (c) => {
  * re-validated here because it travelled through the scheduler as JSON.
  */
 jobs.post('/alt-check', async (c) => {
-  const { log, alt } = getContainer();
+  const { log, alt, flairCheck } = getContainer();
 
   try {
     const request = await c.req.json<TaskRequest>();
@@ -232,7 +232,13 @@ jobs.post('/alt-check', async (c) => {
       return c.json<TaskResponse>({}, 200);
     }
 
-    await alt.check(post);
+    // Independent: a failure in one must not skip the other.
+    const [altResult, flairResult] = await Promise.allSettled([alt.check(post), flairCheck.check(post)]);
+    for (const result of [altResult, flairResult]) {
+      if (result.status === 'rejected') {
+        log.error('post check failed', { postId: post.id, reason: describeError(result.reason) });
+      }
+    }
   } catch (error) {
     log.error('alt check job failed', { reason: describeError(error) });
   }

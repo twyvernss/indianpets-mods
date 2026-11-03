@@ -182,6 +182,11 @@
         "label": "Post flair that marks a fundraiser (blank = every post). Easier to set from the in-subreddit settings menu, which lists your actual flairs.",
         "defaultValue": ""
       },
+      "reportMisflairedFundraisers": {
+        "type": "boolean",
+        "label": "Report posts that look like a fundraiser but have another flair (to the modqueue; never removes)",
+        "defaultValue": true
+      },
       "wikiLogEnabled": {
         "type": "boolean",
         "label": "Keep a durable verification log on a subreddit wiki page (survives the app being uninstalled)",

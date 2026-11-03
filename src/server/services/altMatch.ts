@@ -269,8 +269,11 @@ export function createAltService(deps: AltDeps): AltService {
 
       if (worth && !(await fingerprints.wasReported(post.id))) {
         const duplicateAlready = await links.wasReported(post.id);
+        // Every report the app files is for the chosen fundraiser flair only -
+        // the mod team's rule, with no exceptions. A post under another flair
+        // that looks like a fundraiser is reported separately, as mis-flaired.
         let flairOk = true;
-        if (config.fundraiserFlairText.length > 0 && !worth.banned) {
+        if (config.fundraiserFlairText.length > 0) {
           const snapshot = await reddit.getPost(post.id);
           flairOk = snapshot !== null && matchesFundraiserFlair(snapshot.flairText, config.fundraiserFlairText);
         }

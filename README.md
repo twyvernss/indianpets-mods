@@ -69,6 +69,20 @@ No moderator's personal account ever appears on the post.
 - Pages are rebuilt from Reddit each time, never appended to, and carry no post titles — a post the
   author deletes simply drops off. `fundraiser-verifications/users` lists every page.
 
+**Fundraisers posted under another flair (v4)**
+- AutoModerator holds fundraiser-flaired posts for document checks, so some people post a
+  fundraiser under a normal flair instead. Every new post is checked: a fundraising link (Ketto,
+  Milaap, GoFundMe...), a UPI ID or bank account, or two or more money words ("donate",
+  "vet bill", "GPay", "any amount"...) mark it as a likely fundraiser.
+- If it does not carry the fundraiser flair it is **reported to the modqueue**, e.g.
+  `Looks like a fundraiser but has "Discussion": Ketto link, "donate"`. Never removed.
+- Ordinary posts cost no Reddit call: the text is checked first. Only applies once a fundraiser
+  flair is chosen.
+
+**Everything else acts on the chosen fundraiser flair only.** Duplicate-link reports, alt reports
+(including matches to banned accounts) and the AutoModerator reply all skip posts with any other
+flair; the check above is what catches those.
+
 **Alt accounts and ban evasion (v4)**
 - Every new post is fingerprinted: **UPI IDs, Indian mobile numbers, bank account numbers** (only
   when labelled "A/c" or similar), fundraiser links, and the wording itself (MinHash over
@@ -247,6 +261,7 @@ Layer 1 wins over layer 2, which wins over the built-in defaults.
 | App enabled | on | Master switch. Off means the app takes no action at all. |
 | Name the verifying moderator in the public comment | **off** | Leave this off. Turning it on puts a moderator's username on the post, which is exactly what causes the unsolicited DMs this app exists to prevent. |
 | Which flair marks a fundraiser | none (every post) | A dropdown of the subreddit's real post flairs. When set, the bot only replies to and reports posts with that flair. Falls back to a text box on a subreddit with no flairs. |
+| Report posts that look like a fundraiser but have another flair | on | Reports, never removes. Needs a fundraiser flair chosen. |
 | Saved notices | two starter notices, active immediately | Two or three pre-written verification notices a moderator picks from at verify time. One per block, separated by a line containing only `---`; the first line of each block is its name. |
 | Checklist items | built-in list | One item per line. Markdown bullets are tolerated. Max 20 items, 120 characters each. |
 | Compact checklist | on | One multi-select tick-list instead of a row of toggles. Keeps the form short, which matters on mobile. |

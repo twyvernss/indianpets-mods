@@ -16,6 +16,8 @@ import type { AuditLogService } from './services/auditLog.js';
 import { createAuditLogService } from './services/auditLog.js';
 import type { DuplicateService } from './services/duplicates.js';
 import { createDuplicateService } from './services/duplicates.js';
+import type { FlairCheckService } from './services/flairCheck.js';
+import { createFlairCheckService } from './services/flairCheck.js';
 import type { IntakeService } from './services/intake.js';
 import { createIntakeService } from './services/intake.js';
 import type { ModeratorGate } from './services/moderator.js';
@@ -58,6 +60,7 @@ export type Container = {
   audit: AuditLogService;
   alt: AltService;
   history: UserHistoryService;
+  flairCheck: FlairCheckService;
 };
 
 let instance: Container | null = null;
@@ -155,6 +158,7 @@ export function getContainer(): Container {
     audit,
     alt,
     history,
+    flairCheck: createFlairCheckService({ reddit, redis: redisPort, settings, log, now }),
   };
   return instance;
 }

@@ -82,6 +82,12 @@ export type AppSettings = {
    */
   userHistoryEnabled: boolean;
 
+  /**
+   * Report posts that look like a fundraiser but carry another flair. Only
+   * applies once a fundraiser flair is chosen; never removes anything.
+   */
+  reportMisflairedFundraisers: boolean;
+
   /* --- alt accounts and ban evasion --- */
   /**
    * Compare each new post with other accounts' posts - UPI IDs, phone numbers,
@@ -144,6 +150,7 @@ export const OVERRIDABLE_KEYS = [
   'wikiLogPage',
   'modmailLogEnabled',
   'userHistoryEnabled',
+  'reportMisflairedFundraisers',
   'altDetectionEnabled',
   'altSimilarityPercent',
   'compactChecklist',
@@ -184,6 +191,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   modmailLogEnabled: false,
   userHistoryEnabled: true,
 
+  reportMisflairedFundraisers: true,
   altDetectionEnabled: true,
   altSimilarityPercent: 70,
   automodReplyEnabled: false,
@@ -409,6 +417,10 @@ export function parseSettings(raw: Record<string, unknown>): AppSettings {
       DEFAULT_SETTINGS.userHistoryEnabled,
     ),
 
+    reportMisflairedFundraisers: coerceBoolean(
+      raw['reportMisflairedFundraisers'],
+      DEFAULT_SETTINGS.reportMisflairedFundraisers,
+    ),
     altDetectionEnabled: coerceBoolean(
       raw['altDetectionEnabled'],
       DEFAULT_SETTINGS.altDetectionEnabled,

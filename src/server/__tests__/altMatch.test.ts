@@ -17,6 +17,7 @@ import type { PostContent } from '../services/redditPort.js';
 import type { AppSettings } from '../settings.js';
 import { buildAltReportReason, describeMatch } from '../text.js';
 import { fakeLogger, fakeSettings, FakeRedis, FakeReddit, FakeScheduler } from './fakes.js';
+import type { FakeRedditOptions } from './fakes.js';
 
 const NOW = 1_700_000_000_000;
 
@@ -141,10 +142,10 @@ describe('match wording', () => {
   });
 });
 
-function harness(overrides: Partial<AppSettings> = {}) {
+function harness(overrides: Partial<AppSettings> = {}, redditOptions: FakeRedditOptions = {}) {
   const redis = new FakeRedis();
   redis.nowMs = NOW;
-  const reddit = new FakeReddit();
+  const reddit = new FakeReddit(redditOptions);
   const scheduler = new FakeScheduler();
   const fingerprints = createFingerprintRepo(redis);
   const links = createLinkRepo(redis);
@@ -270,15 +271,21 @@ describe('alt check', () => {
     expect(h.reddit.reports).toHaveLength(0);
   });
 
-  it('respects the fundraiser flair filter, except for a banned match', async () => {
+  it('reports only posts with the chosen fundraiser flair, even for a banned match', async () => {
     const h = harness({ fundraiserFlairText: 'Fundraiser' });
+    h.reddit.banned.add('first');
     await h.service.index(post('t3_old', 'first', 'UPI bruno.help@okaxis'));
     await h.service.check(post('t3_new', 'second', 'UPI bruno.help@okaxis'));
     expect(h.reddit.reports).toHaveLength(0);
 
-    h.reddit.banned.add('first');
-    await h.service.check(post('t3_new2', 'third', 'UPI bruno.help@okaxis'));
-    expect(h.reddit.reports).toHaveLength(1);
+    const flaired = harness(
+      { fundraiserFlairText: 'Fundraiser' },
+      { post: { id: 't3_x' as T3, authorName: 'third', isApproved: true, isRemoved: false, flairText: 'Fundraiser' } },
+    );
+    flaired.reddit.banned.add('first');
+    await flaired.service.index(post('t3_old', 'first', 'UPI bruno.help@okaxis'));
+    await flaired.service.check(post('t3_new2', 'third', 'UPI bruno.help@okaxis'));
+    expect(flaired.reddit.reports).toHaveLength(1);
   });
 
   it('queues a rebuild of the poster’s history page', async () => {

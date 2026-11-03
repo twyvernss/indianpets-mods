@@ -138,7 +138,12 @@ triggers.post('/post-submit', async (c) => {
       // ban status, so it runs as a job. The text travels with the job, which
       // saves the job fetching the post again.
       const config = await settings.get();
-      if (config.enabled && config.altDetectionEnabled && author) {
+      // One job does both checks that need the post's text: alt matching, and
+      // spotting a fundraiser posted under another flair.
+      const wanted =
+        config.altDetectionEnabled ||
+        (config.reportMisflairedFundraisers && config.fundraiserFlairText.length > 0);
+      if (config.enabled && wanted && author) {
         const nowMs = Date.now();
         await scheduler.runJob({
           name: JOBS.altCheck,

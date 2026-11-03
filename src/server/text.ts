@@ -303,6 +303,15 @@ export function describeMatch(match: MatchSummary): string {
   return parts.join('; ');
 }
 
+/** Modqueue reason for a fundraiser posted under another flair. */
+export function buildMisflairReason(flairText: string | null, reasons: readonly string[]): string {
+  const flair = flairText && flairText.trim().length > 0 ? `"${flairText.trim()}"` : 'no flair';
+  return truncate(
+    `Looks like a fundraiser but has ${flair}: ${reasons.join(', ')}`,
+    CONFIG.reportReasonMaxLength,
+  );
+}
+
 /** Modqueue reason for a post that looks like another account's. */
 export function buildAltReportReason(match: MatchSummary): string {
   const who = `u/${match.author}${match.banned ? ' (BANNED here)' : ''}`;
