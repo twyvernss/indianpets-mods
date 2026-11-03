@@ -13,6 +13,7 @@ import {
   createSettingsReader,
   DEFAULT_SETTINGS,
   matchesFundraiserFlair,
+  normaliseFlair,
   messageTemplatesToText,
   parseChecklistItems,
   parseMessageTemplates,
@@ -411,6 +412,26 @@ describe('parseMessageTemplates', () => {
   it('round-trips through the editor text', () => {
     const templates = parseMessageTemplates(block('A', 'body a'));
     expect(parseMessageTemplates(messageTemplatesToText(templates))).toEqual(templates);
+  });
+});
+
+describe('matchesFundraiserFlair with r/IndianPets emoji flairs', () => {
+  it('matches whether or not the post flair carries the emoji shortcode', () => {
+    for (const postFlair of ['Fundraiser:cake:', 'Fundraiser :cake:', 'Fundraiser', 'fundraiser 🎂']) {
+      expect(matchesFundraiserFlair(postFlair, 'Fundraiser:cake:')).toBe(true);
+    }
+  });
+
+  it('does not match other flairs', () => {
+    for (const postFlair of ['Discussion:sloth:', 'Adoption :hamster:', 'Happy Birthday :cake:', null]) {
+      expect(matchesFundraiserFlair(postFlair, 'Fundraiser:cake:')).toBe(false);
+    }
+  });
+
+  it('strips shortcodes, emoji and spacing to the words', () => {
+    expect(normaliseFlair('Media:doge::cat_blep::partyparrot:')).toBe('media');
+    expect(normaliseFlair('Grief ❤️‍🩹')).toBe('grief');
+    expect(normaliseFlair('  Lost & Found :redditgold: ')).toBe('lost & found');
   });
 });
 

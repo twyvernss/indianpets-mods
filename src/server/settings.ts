@@ -367,18 +367,41 @@ export function messageTemplatesToText(templates: readonly MessageTemplate[]): s
 }
 
 /**
+ * A flair reduced to its words: lower case, emoji shortcodes (`:cake:`) and
+ * emoji removed, spacing collapsed.
+ *
+ * r/IndianPets' flair templates read like "Fundraiser:cake:", and Reddit does
+ * not promise that a post's flair text carries the shortcode the same way the
+ * template does. Comparing words only means "Fundraiser:cake:", "Fundraiser
+ * :cake:" and "Fundraiser 🎂" all match each other.
+ */
+export function normaliseFlair(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/:[a-z0-9_+-]+:/gu, ' ')
+    .replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}]/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim();
+}
+
+/**
  * Does this post's flair mark it as a fundraiser?
  *
  * A blank setting means "every post counts", so the feature is opt-in and the
- * app never silently ignores posts because of a flair rename.
+ * app never silently ignores posts because of a flair rename. Otherwise the
+ * words of the chosen flair must appear in the post's flair, ignoring case,
+ * spacing and emoji.
  */
 export function matchesFundraiserFlair(
   flairText: string | null,
   configured: string,
 ): boolean {
-  const wanted = configured.trim().toLowerCase();
-  if (wanted.length === 0) return true;
-  return (flairText ?? '').toLowerCase().includes(wanted);
+  if (configured.trim().length === 0) return true;
+  const wanted = normaliseFlair(configured);
+  const actual = normaliseFlair(flairText ?? '');
+  // A flair made only of emoji has no words to compare; fall back to raw text.
+  if (wanted.length === 0) return (flairText ?? '').toLowerCase().includes(configured.trim().toLowerCase());
+  return actual.includes(wanted);
 }
 
 /** Renders the checklist back to the one-per-line form a moderator edits. */
