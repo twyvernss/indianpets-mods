@@ -23,6 +23,8 @@ export type SweepResult = {
   reminded: number;
   escalated: number;
   closed: number;
+  /** Skipped because a moderator removed the post. Picked up again if restored. */
+  removed: number;
   /** True when another batch was queued because this page was full. */
   chained: boolean;
 };
@@ -55,6 +57,8 @@ export type FollowUpResult =
   | { kind: 'not-verified' }
   | { kind: 'deleted' }
   | { kind: 'post-missing' }
+  /** A moderator removed the post, so nothing was posted or reported. */
+  | { kind: 'removed' }
   | { kind: 'busy' }
   | { kind: 'disabled' }
   | { kind: 'failed'; detail: string };
@@ -101,6 +105,7 @@ export function createReminderService(deps: ReminderDeps): ReminderService {
         reminded: 0,
         escalated: 0,
         closed: 0,
+        removed: 0,
         chained: false,
       };
 
@@ -129,6 +134,7 @@ export function createReminderService(deps: ReminderDeps): ReminderService {
           if (outcome === 'reminded') result.reminded += 1;
           else if (outcome === 'escalated') result.escalated += 1;
           else if (outcome === 'closed') result.closed += 1;
+          else if (outcome === 'removed') result.removed += 1;
         } catch (error) {
           // One bad post must not abandon the rest of the page. It stays in the
           // open index and is retried on the next sweep.
@@ -169,6 +175,7 @@ export function createReminderService(deps: ReminderDeps): ReminderService {
         reminded: result.reminded,
         escalated: result.escalated,
         closed: result.closed,
+        removed: result.removed,
         chained: result.chained,
       });
 
@@ -241,15 +248,19 @@ export function createReminderService(deps: ReminderDeps): ReminderService {
         const chosen: FollowUpStep =
           step === 'next' ? (record.reminderSentAtMs === null ? 'remind' : 'escalate') : step;
 
+        // A moderator removed it: the team has already made its call, so
+        // neither a reminder nor a report is sent, even when asked by hand.
+        const state = await postState(record, timestamp);
+        if (state === 'missing') return { kind: 'post-missing' };
+        if (state === 'removed') return { kind: 'removed' };
+
         if (chosen === 'remind') {
           // Idempotent: never a second reminder on the same post.
           if (record.reminderSentAtMs !== null) {
             return { kind: 'already-reminded', atMs: record.reminderSentAtMs };
           }
 
-          if ((await sendReminder(record, timestamp)) === 'post-missing') {
-            return { kind: 'post-missing' };
-          }
+          await sendReminder(record, timestamp);
 
           log.info('reminder sent at a moderator request', {
             postId,
@@ -283,17 +294,30 @@ export function createReminderService(deps: ReminderDeps): ReminderService {
    * someone's fundraiser is a far worse failure than missing one reminder,
    * which the next sweep picks up anyway.
    */
-  async function sendReminder(
+  /**
+   * Whether the post is still up, read from Reddit at the moment of acting.
+   *
+   * A post gone from Reddit leaves the chase for good and is scrubbed, per the
+   * deletion rules. A post a moderator REMOVED is only skipped: it stays in the
+   * open index, so if it is approved again the chase carries on from where it
+   * was. Reading this live, rather than relying on the delete trigger, is what
+   * makes a manual removal always win - Reddit does not reliably send that
+   * trigger for moderator removals.
+   */
+  async function postState(
     record: VerificationRecord,
     timestamp: number,
-  ): Promise<'reminded' | 'post-missing'> {
+  ): Promise<'up' | 'removed' | 'missing'> {
     const post = await reddit.getPost(record.postId);
     if (!post) {
-      // Gone from Reddit: stop chasing and scrub, per the deletion rules.
       await repo.markDeleted(record.postId, timestamp);
-      return 'post-missing';
+      return 'missing';
     }
+    return post.isRemoved ? 'removed' : 'up';
+  }
 
+  /** Callers check {@link postState} first; this never comments on a removed post. */
+  async function sendReminder(record: VerificationRecord, timestamp: number): Promise<void> {
     const config = await settings.get();
     const daysSinceVerified = daysBetween(record.verifiedAtMs, timestamp);
 
@@ -332,8 +356,6 @@ export function createReminderService(deps: ReminderDeps): ReminderService {
         reason: describeError(error),
       });
     }
-
-    return 'reminded';
   }
 
   /**
@@ -386,7 +408,7 @@ export function createReminderService(deps: ReminderDeps): ReminderService {
     timestamp: number,
     graceMs: number,
     config: AppSettings,
-  ): Promise<'reminded' | 'escalated' | 'closed' | 'waiting'> {
+  ): Promise<'reminded' | 'escalated' | 'closed' | 'removed' | 'waiting'> {
     // A deleted post always leaves the chase. A post the OP ANSWERED only
     // leaves it when the subreddit wants replies to end the chase - by default
     // it does not, because a reply is not the same as an answer and the mod
@@ -397,11 +419,19 @@ export function createReminderService(deps: ReminderDeps): ReminderService {
       return 'closed';
     }
 
-    if (record.reminderSentAtMs === null) {
-      return (await sendReminder(record, timestamp)) === 'reminded' ? 'reminded' : 'closed';
+    // Nothing is due yet, so there is no reason to look the post up.
+    if (record.reminderSentAtMs !== null && timestamp - record.reminderSentAtMs < graceMs) {
+      return 'waiting';
     }
 
-    if (timestamp - record.reminderSentAtMs < graceMs) return 'waiting';
+    const state = await postState(record, timestamp);
+    if (state === 'missing') return 'closed';
+    if (state === 'removed') return 'removed';
+
+    if (record.reminderSentAtMs === null) {
+      await sendReminder(record, timestamp);
+      return 'reminded';
+    }
 
     await escalate(record, timestamp, config.lockStalePosts);
     return 'escalated';

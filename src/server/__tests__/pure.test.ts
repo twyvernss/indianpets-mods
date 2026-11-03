@@ -210,6 +210,16 @@ describe('public comment wording', () => {
     expect(comment).toContain('at your own discretion');
   });
 
+  it('no longer says documents were submitted "privately", even from a saved copy of the old wording', () => {
+    expect(buildVerificationComment({ ...base, modName: null })).not.toContain('privately');
+    const saved =
+      'The moderators of r/{subreddit} have reviewed documents submitted privately by the original poster for this fundraiser.';
+    const comment = buildVerificationComment({ ...base, modName: null, customText: saved });
+    expect(comment).toBe(
+      'The moderators of r/IndianPets have reviewed documents submitted by the original poster for this fundraiser.',
+    );
+  });
+
   it('says Approved in the heading, in bold', () => {
     const comment = buildVerificationComment({ ...base, modName: null });
     expect(comment.split('\n')[0]).toContain('**Approved**');
@@ -537,6 +547,31 @@ describe('every bot message is an editable template', () => {
     expect(blank).toContain('next 7 days');
   });
 
+  it('never says "0 days ago" or "next 1 days", including in a saved copy of the wording', () => {
+    for (const custom of ['', DEFAULT_REMINDER_TEMPLATE]) {
+      const fresh = buildReminderComment({
+        custom,
+        subredditName: 'IndianPets',
+        authorName: 'op_user',
+        daysSinceVerified: 0,
+        graceDays: 1,
+      });
+      expect(fresh).toContain('mod team today.');
+      expect(fresh).toContain('in the next 24 hours,');
+      expect(fresh).not.toContain('0 days');
+      expect(fresh).not.toContain('1 days');
+    }
+    const one = buildReminderComment({
+      custom: '',
+      subredditName: 'IndianPets',
+      authorName: 'op_user',
+      daysSinceVerified: 1,
+      graceDays: 3,
+    });
+    expect(one).toContain('1 day ago');
+    expect(one).toContain('next 3 days');
+  });
+
   it('the intake message renders the same blank or prefilled', () => {
     const args = { subredditName: 'IndianPets', authorName: 'op_user' };
     const blank = renderIntakeComment({ ...args, custom: '' });
@@ -682,7 +717,7 @@ describe('wiki check toasts', () => {
 });
 
 describe('sweepToast', () => {
-  const empty = { examined: 0, reminded: 0, escalated: 0, closed: 0, chained: false };
+  const empty = { examined: 0, reminded: 0, escalated: 0, closed: 0, removed: 0, chained: false };
 
   it('distinguishes "nothing was due" from "nothing happened"', () => {
     // These look identical to a moderator otherwise, and only one of them is
@@ -692,10 +727,11 @@ describe('sweepToast', () => {
   });
 
   it('names what it actually did', () => {
-    const text = sweepToast({ examined: 5, reminded: 2, escalated: 1, closed: 1, chained: false });
+    const text = sweepToast({ ...empty, examined: 5, reminded: 2, escalated: 1, closed: 1, removed: 2 });
     expect(text).toContain('2 asked for an update');
     expect(text).toContain('1 reported to the modqueue');
     expect(text).toContain('1 closed');
+    expect(text).toContain('2 skipped because a mod removed them');
   });
 
   it('says when more batches are still running', () => {

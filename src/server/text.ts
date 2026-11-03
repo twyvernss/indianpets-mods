@@ -115,7 +115,15 @@ export function buildVerificationComment(input: {
   // One rendering path for all three sources - picked template, custom notice,
   // built-in template - so they behave identically and a moderator who saves
   // the prefilled default changes nothing.
-  const rendered = applyPlaceholders(input.customText.trim() || DEFAULT_NOTICE_TEMPLATE, {
+  //
+  // The built-in wording once said documents were "submitted privately". The
+  // mod team dropped that word; a notice saved from the old prefilled wording
+  // still carries it, so that exact phrase is corrected here too.
+  const template = (input.customText.trim() || DEFAULT_NOTICE_TEMPLATE).replaceAll(
+    'documents submitted privately by the original poster',
+    'documents submitted by the original poster',
+  );
+  const rendered = applyPlaceholders(template, {
     subreddit: input.subredditName,
     date: input.dateLabel,
     mod: attribution,
@@ -191,12 +199,27 @@ export function buildReminderComment(input: {
   daysSinceVerified: number;
   graceDays: number;
 }): string {
-  return applyPlaceholders(input.custom.trim() || DEFAULT_REMINDER_TEMPLATE, {
+  // The two phrases the built-in wording uses are rendered as natural English
+  // first, so a post verified this morning never says "0 days ago" and a one
+  // day wait never says "next 1 days". Matched on the phrase rather than by
+  // changing the template, because subreddits that saved the prefilled
+  // wording in "Edit bot messages" hold their own copy of it.
+  const template = (input.custom.trim() || DEFAULT_REMINDER_TEMPLATE)
+    .replaceAll('{days} days ago', daysAgo(input.daysSinceVerified))
+    .replaceAll('next {grace} days', input.graceDays === 1 ? 'next 24 hours' : `next ${input.graceDays} days`);
+
+  return applyPlaceholders(template, {
     subreddit: input.subredditName,
     op: input.authorName ? `u/${input.authorName}` : 'Hi there',
     days: String(input.daysSinceVerified),
     grace: String(input.graceDays),
   });
+}
+
+/** "today", "1 day ago", "40 days ago". */
+function daysAgo(days: number): string {
+  if (days <= 0) return 'today';
+  return days === 1 ? '1 day ago' : `${days} days ago`;
 }
 
 /** Modqueue report reason for a fundraiser that never answered its reminder. */
@@ -477,6 +500,8 @@ export const FOLLOW_UP_TOASTS = {
   postMissing: 'That post no longer exists on Reddit. The app has stopped chasing it.',
   busy: 'Another follow-up for this post is already running. Give it a few seconds.',
   disabled: 'The app is switched off. Turn it back on from "Fundraiser tools settings".',
+  removed:
+    'A moderator removed this post, so nothing was sent or reported. Approve it again first if you want to follow up.',
 } as const;
 
 export function escalatedToast(locked: boolean): string {
@@ -533,6 +558,7 @@ export function sweepToast(result: {
   reminded: number;
   escalated: number;
   closed: number;
+  removed: number;
   chained: boolean;
 }): string {
   if (result.examined === 0) {
@@ -543,6 +569,7 @@ export function sweepToast(result: {
   if (result.reminded > 0) done.push(`${result.reminded} asked for an update`);
   if (result.escalated > 0) done.push(`${result.escalated} reported to the modqueue`);
   if (result.closed > 0) done.push(`${result.closed} closed`);
+  if (result.removed > 0) done.push(`${result.removed} skipped because a mod removed them`);
 
   const summary = done.length > 0 ? done.join(', ') : 'nothing was due yet';
   const more = result.chained ? ' More are still being processed.' : '';

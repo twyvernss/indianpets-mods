@@ -102,6 +102,9 @@ export function followUpResponse(result: FollowUpResult): UiResponse {
     case 'post-missing':
       return { showToast: { text: FOLLOW_UP_TOASTS.postMissing, appearance: 'neutral' } };
 
+    case 'removed':
+      return { showToast: { text: FOLLOW_UP_TOASTS.removed, appearance: 'neutral' } };
+
     case 'busy':
       return { showToast: { text: FOLLOW_UP_TOASTS.busy, appearance: 'neutral' } };
 

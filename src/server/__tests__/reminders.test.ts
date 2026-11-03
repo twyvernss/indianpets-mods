@@ -28,7 +28,12 @@ function harness(
   redditOptions: FakeRedditOptions = {},
 ): Harness {
   const redis = new FakeRedis();
-  const reddit = new FakeReddit(redditOptions);
+  // A verified fundraiser is approved and up. The fake's own default is a
+  // removed post, which imitates an AutoModerator hold for the verify tests.
+  const reddit = new FakeReddit({
+    post: { id: 't3_up' as T3, authorName: 'op_user', isApproved: true, isRemoved: false, flairText: null },
+    ...redditOptions,
+  });
   const scheduler = new FakeScheduler();
   let clock = NOW;
   redis.nowMs = clock;
@@ -88,6 +93,46 @@ describe('sweep - reminding', () => {
     expect(h.reddit.lastCommentText).toContain('u/op_user');
     expect(h.reddit.lastCommentText).toContain('complete');
     expect((await h.repo.get('t3_old' as T3))?.reminderSentAtMs).toBe(NOW);
+  });
+
+  const REMOVED = { id: 't3_x' as T3, authorName: 'op_user', isApproved: false, isRemoved: true, flairText: null };
+
+  it('sends nothing on a post a moderator removed, and picks it up again once approved', async () => {
+    const h = harness({}, { post: REMOVED });
+    await h.seed({ postId: 't3_old' });
+
+    const result = await h.service.sweep({ offset: 0, batchIndex: 0 });
+    expect(result).toMatchObject({ examined: 1, reminded: 0, removed: 1 });
+    expect(h.reddit.comments).toHaveLength(0);
+    expect((await h.repo.get('t3_old' as T3))?.reminderSentAtMs).toBeNull();
+
+    // Still in the chase: the same record, once the post is up again, is reminded.
+    const restored = harness();
+    await restored.seed({ postId: 't3_old' });
+    expect((await restored.service.sweep({ offset: 0, batchIndex: 0 })).reminded).toBe(1);
+  });
+
+  it('does not report a removed post to the modqueue after the grace period', async () => {
+    const h = harness({}, { post: REMOVED });
+    await h.seed({ postId: 't3_old', reminderSentAtMs: NOW - 30 * DAY });
+
+    const result = await h.service.sweep({ offset: 0, batchIndex: 0 });
+    expect(result.removed).toBe(1);
+    expect(h.reddit.reports).toHaveLength(0);
+  });
+
+  it('refuses a by-hand follow-up on a removed post', async () => {
+    const h = harness({}, { post: REMOVED });
+    await h.seed({ postId: 't3_old' });
+
+    await expect(h.service.runFollowUp({ postId: 't3_old' as T3, step: 'remind' })).resolves.toEqual({
+      kind: 'removed',
+    });
+    await expect(h.service.runFollowUp({ postId: 't3_old' as T3, step: 'escalate' })).resolves.toEqual({
+      kind: 'removed',
+    });
+    expect(h.reddit.comments).toHaveLength(0);
+    expect(h.reddit.reports).toHaveLength(0);
   });
 
   it('leaves a fundraiser that is not old enough alone', async () => {
