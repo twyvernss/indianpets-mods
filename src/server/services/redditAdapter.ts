@@ -5,6 +5,7 @@ import { CONFIG } from '../config.js';
 import type { Logger } from '../lib/logger.js';
 import { describeError } from '../lib/logger.js';
 import { withRetry } from '../lib/retry.js';
+import { judgeWikiPrivacy, WIKI_PERM_MODS_ONLY } from '../lib/wikiPrivacy.js';
 import type {
   AuthorSnapshot,
   CommentHandle,
@@ -51,7 +52,7 @@ function toPostContent(post: {
  * part of Reddit's wiki API (0 = subreddit permissions, 1 = approved
  * contributors, 2 = mods only) and is stable.
  */
-const WIKI_MODS_ONLY = 2 as WikiPagePermissionLevel;
+const WIKI_MODS_ONLY = WIKI_PERM_MODS_ONLY as WikiPagePermissionLevel;
 
 export function createRedditAdapter(log: Logger): RedditPort {
   const run = <T>(label: string, operation: () => Promise<T>): Promise<T> =>
@@ -190,21 +191,21 @@ export function createRedditAdapter(log: Logger): RedditPort {
         );
 
         // Read it back. Applying a setting is not the same as it having taken,
-        // and this decides whether moderator names get written down.
+        // and this decides whether moderator names get written down. See
+        // `judgeWikiPrivacy` for why the permission level alone is not enough.
         const settings = await run('getWikiPageSettings', () =>
           reddit.getWikiPageSettings(context.subredditName, page),
         );
 
-        if (Number(settings.permLevel) === Number(WIKI_MODS_ONLY)) return { ok: true };
+        const verdict = judgeWikiPrivacy({ permLevel: settings.permLevel, listed: settings.listed });
+        if (verdict.ok) return { ok: true };
 
-        const reason = `Reddit reports this page's permission level as ${String(
-          settings.permLevel,
-        )}, not moderators-only (${String(WIKI_MODS_ONLY)}).`;
         log.error('wiki log page is NOT restricted to moderators; refusing to write to it', {
           page,
           permLevel: String(settings.permLevel),
+          listed: String(settings.listed),
         });
-        return { ok: false, reason };
+        return { ok: false, reason: verdict.reason };
       } catch (error) {
         const reason = describeError(error);
         log.error('could not confirm the wiki log page is private', { page, reason });

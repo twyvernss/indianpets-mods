@@ -300,6 +300,12 @@ moderator never waits for it:
   written** - not on the first append and not on any later one, because a moderator could relax the
   setting at any time. The row names the verifying moderator, and this app exists so moderators are
   not publicly attached to verifications.
+- **Devvit 0.14.5 misreads the permission level as 0 on every page** (Reddit's JSON says
+  `permlevel`, Devvit expects `permLevel`). Confirmed by hand: pages it reported as 0 showed "only
+  mods may edit and view" on old.reddit. So a 0 is accepted only when the same read-back shows the
+  page **unlisted**, which proves the one request carrying both settings landed. A page still
+  listed, or any other level, still blocks the write. See `src/server/lib/wikiPrivacy.ts`. Before
+  0.0.11 this blocked every write; each upgrade now re-logs any verification the wiki is missing.
 - The wiki keeps its own revision history, so a bad write is recoverable.
 - Appends are serialised behind a short Redis lock, because it is a read-modify-write.
 - A redelivered job will not write the same post twice.

@@ -238,7 +238,15 @@ triggers.post('/app-upgrade', async (c) => {
       data: { after: '', batchIndex: 0 },
       runAt: new Date(Date.now() + 30_000),
     });
-    log.info('queued author history and fingerprint backfills after upgrade');
+    // Writes any verification the wiki log is missing. Until 0.0.11 the
+    // privacy check misread every page as public, so nothing was logged.
+    // Rows already on the wiki are skipped, so this is safe on every upgrade.
+    await scheduler.runJob({
+      name: JOBS.auditBackfill,
+      data: { offset: 0, batchIndex: 0 },
+      runAt: new Date(Date.now() + 60_000),
+    });
+    log.info('queued author history, fingerprint and wiki log backfills after upgrade');
   } catch (error) {
     log.error('app-upgrade trigger failed', { reason: describeError(error) });
   }

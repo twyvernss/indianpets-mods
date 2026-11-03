@@ -134,6 +134,9 @@
       },
       "user-history": {
         "endpoint": "/internal/jobs/user-history"
+      },
+      "audit-backfill": {
+        "endpoint": "/internal/jobs/audit-backfill"
       }
     }
   },

@@ -9,6 +9,7 @@ import {
   modDiscussionBody,
   upgradeAuditHeader,
 } from '../services/auditLog.js';
+import { judgeWikiPrivacy } from '../lib/wikiPrivacy.js';
 import type { AppSettings } from '../settings.js';
 import type { VerificationRecord } from '../types.js';
 import { fakeLogger, fakeSettings, FakeRedis, FakeReddit } from './fakes.js';
@@ -169,6 +170,48 @@ describe('writing the log', () => {
     h.reddit.wiki.set(PAGE, 'x'.repeat(500_000));
     await h.service.record(record());
     expect(h.reddit.wiki.get(PAGE)).toBe('x'.repeat(500_000));
+  });
+});
+
+describe('backfill', () => {
+  it('writes the missing row but does not post to mod discussions again', async () => {
+    const h = harness({ modmailLogEnabled: true });
+    await h.service.record(record(), { backfill: true });
+    expect(h.reddit.wiki.get(PAGE)).toContain('t3_abc123');
+    expect(h.reddit.modDiscussions).toHaveLength(0);
+  });
+
+  it('leaves a row that is already logged alone', async () => {
+    const h = harness();
+    await h.service.record(record());
+    await h.service.record(record(), { backfill: true });
+    expect(h.reddit.wiki.get(PAGE)?.split('t3_abc123').length).toBe(2);
+  });
+});
+
+describe('wiki privacy judgement', () => {
+  it('accepts a page Reddit reads back as moderators-only', () => {
+    expect(judgeWikiPrivacy({ permLevel: 2, listed: true })).toEqual({ ok: true, inferred: false });
+  });
+
+  it('accepts the misread 0 when the same request did make the page unlisted', () => {
+    // Devvit reads "permlevel" back as 0 for every page; "listed" reads correctly.
+    expect(judgeWikiPrivacy({ permLevel: 0, listed: false })).toEqual({ ok: true, inferred: true });
+  });
+
+  it('refuses when the page is still listed, so the request did not land', () => {
+    const verdict = judgeWikiPrivacy({ permLevel: 0, listed: true });
+    expect(verdict.ok).toBe(false);
+  });
+
+  it('refuses a readable level that is not moderators-only', () => {
+    const verdict = judgeWikiPrivacy({ permLevel: 1, listed: false });
+    expect(verdict).toMatchObject({ ok: false });
+    if (!verdict.ok) expect(verdict.reason).toContain('permission level as 1');
+  });
+
+  it('refuses anything it cannot read', () => {
+    expect(judgeWikiPrivacy({ permLevel: undefined, listed: undefined }).ok).toBe(false);
   });
 });
 

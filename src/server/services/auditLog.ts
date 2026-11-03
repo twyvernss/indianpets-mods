@@ -28,8 +28,13 @@ import type { RedditPort } from './redditPort.js';
  * every write - and pages are created MODS_ONLY and unlisted.
  */
 export type AuditLogService = {
-  /** Appends one verification. Called from a scheduled job, never inline. */
-  record(record: VerificationRecord): Promise<void>;
+  /**
+   * Appends one verification. Called from a scheduled job, never inline.
+   *
+   * `backfill` re-logs an old verification: the wiki row is written if it is
+   * missing, but nothing is re-posted to Mod Discussions.
+   */
+  record(record: VerificationRecord, options?: { backfill?: boolean }): Promise<void>;
 
   /**
    * Proves, on demand, that the wiki log is actually working.
@@ -202,7 +207,7 @@ export function createAuditLogService(deps: AuditLogDeps): AuditLogService {
   }
 
   return {
-    async record(record): Promise<void> {
+    async record(record, options = {}): Promise<void> {
       const config = await settings.get();
       if (!config.enabled) return;
 
@@ -231,7 +236,7 @@ export function createAuditLogService(deps: AuditLogDeps): AuditLogService {
         }
       }
 
-      if (config.modmailLogEnabled) {
+      if (config.modmailLogEnabled && !options.backfill) {
         try {
           await reddit.sendModDiscussion(
             `Fundraiser verified: ${record.postId}`,

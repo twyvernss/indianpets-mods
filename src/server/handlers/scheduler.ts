@@ -279,3 +279,47 @@ jobs.post('/user-history', async (c) => {
 
   return c.json<TaskResponse>({}, 200);
 });
+
+/**
+ * Writes past verifications into the wiki log, oldest first, a few per run.
+ *
+ * Exists because the privacy check once misread every page as public and so
+ * logged nothing; it is queued on every upgrade and is harmless when there is
+ * nothing to do, because `record` skips posts already on the page.
+ */
+jobs.post('/audit-backfill', async (c) => {
+  const { log, audit, repo, scheduler } = getContainer();
+
+  try {
+    const request = await c.req.json<TaskRequest>();
+    const offset = readNumber(request.data, 'offset');
+    const batchIndex = readNumber(request.data, 'batchIndex');
+
+    const postIds = await repo.allVerified(offset, CONFIG.audit.backfillBatchSize);
+    if (postIds.length === 0) {
+      log.info('wiki log backfill complete', { offset });
+      return c.json<TaskResponse>({}, 200);
+    }
+
+    const records = await repo.getMany(postIds);
+    for (const record of records) {
+      if (record.status === 'complete') await audit.record(record, { backfill: true });
+    }
+    log.info('wiki log backfill batch done', { offset, examined: records.length });
+
+    if (
+      postIds.length === CONFIG.audit.backfillBatchSize &&
+      batchIndex + 1 < CONFIG.audit.maxBackfillBatches
+    ) {
+      await scheduler.runJob({
+        name: JOBS.auditBackfill,
+        data: { offset: offset + postIds.length, batchIndex: batchIndex + 1 },
+        runAt: new Date(Date.now() + 5_000),
+      });
+    }
+  } catch (error) {
+    log.error('wiki log backfill failed', { reason: describeError(error) });
+  }
+
+  return c.json<TaskResponse>({}, 200);
+});

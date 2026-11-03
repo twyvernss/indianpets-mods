@@ -67,6 +67,13 @@ export const CONFIG = {
     lockTtlSeconds: 30,
     /** Delay before the append runs, keeping it off the moderator's action. */
     delaySeconds: 5,
+    /**
+     * Verifications re-logged per backfill run. Each costs about six Reddit
+     * calls (privacy check, read, write), so this stays small.
+     */
+    backfillBatchSize: 5,
+    /** Ceiling on chained runs: 200 x 5 = 1,000 verifications. */
+    maxBackfillBatches: 200,
   },
 
   /** Guard rails on moderator-written notice templates. */
@@ -198,6 +205,8 @@ export const JOBS = {
   authorBackfill: 'author-backfill',
   /** Appends one verification to the durable wiki log. */
   auditLog: 'audit-log',
+  /** Re-logs past verifications whose wiki row is missing. */
+  auditBackfill: 'audit-backfill',
   /** Fingerprints a new post and reports it if it looks like another account's. */
   altCheck: 'alt-check',
   /** Fingerprints recent posts so matching has history to compare against. */
