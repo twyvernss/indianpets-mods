@@ -107,6 +107,10 @@ menu.post('/settings', async (c) => {
     }
 
     const [current, flairs] = await Promise.all([settings.get(), reddit.getPostFlairs()]);
+    log.info('settings opened', {
+      fundraiserFlair: current.fundraiserFlairText || '(any post)',
+      flairs: flairs.map((flair) => flair.text).join(' | '),
+    });
     return c.json<UiResponse>(settingsFormResponse(current, flairs));
   } catch (error) {
     log.error('settings menu action failed', { reason: describeError(error) });

@@ -1,7 +1,7 @@
 import type { FormField, UiResponse } from '@devvit/web/shared';
 import { CONFIG } from './config.js';
 import type { AppSettings } from './settings.js';
-import { ANY_FLAIR, checklistItemsToText } from './settings.js';
+import { ANY_FLAIR, checklistItemsToText, matchesFundraiserFlair } from './settings.js';
 import type { FollowUpStep } from './services/reminders.js';
 import {
   DEFAULT_INTAKE_TEMPLATE,
@@ -248,6 +248,19 @@ export function settingsFormResponse(
   // A dropdown of the subreddit's real flairs when there are any; a plain text
   // box otherwise, so a brand new test subreddit is not stuck with an empty
   // menu and no way to type a value.
+  // The saved value is trimmed text and is matched loosely (see
+  // `matchesFundraiserFlair`), but a select only shows a value that equals one
+  // option exactly. So the option is found the same loose way; a saved value
+  // matching no current flair is offered as its own option. Either way the
+  // menu shows what the filter is really doing instead of looking unset.
+  const saved = current.fundraiserFlairText;
+  const savedOption =
+    saved.length === 0
+      ? ANY_FLAIR
+      : (availableFlairs.find((flair) => flair.text.trim().toLowerCase() === saved.toLowerCase()) ??
+          availableFlairs.find((flair) => matchesFundraiserFlair(flair.text, saved)))?.text ?? saved;
+  const savedIsListed = savedOption === ANY_FLAIR || availableFlairs.some((flair) => flair.text === savedOption);
+
   const flairField: FormField =
     availableFlairs.length > 0
       ? {
@@ -259,8 +272,9 @@ export function settingsFormResponse(
           options: [
             { label: 'Any post (no flair filter)', value: ANY_FLAIR },
             ...availableFlairs.map((flair) => ({ label: flair.text, value: flair.text })),
+            ...(savedIsListed ? [] : [{ label: `${savedOption} (saved, not a current flair)`, value: savedOption }]),
           ],
-          defaultValue: [current.fundraiserFlairText.length > 0 ? current.fundraiserFlairText : ANY_FLAIR],
+          defaultValue: [savedOption],
         }
       : {
           type: 'string',

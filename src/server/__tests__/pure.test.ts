@@ -20,6 +20,7 @@ import {
   sanitiseWikiPageName,
   TEMPLATE_SEPARATOR,
 } from '../settings.js';
+import { settingsFormResponse } from '../formDefinitions.js';
 import {
   buildReminderComment,
   buildVerificationComment,
@@ -780,5 +781,34 @@ describe('sweepToast', () => {
 
   it('never writes "1 fundraisers"', () => {
     expect(sweepToast({ ...empty, examined: 1, reminded: 1 })).toContain('1 verified fundraiser:');
+  });
+});
+
+describe('settings form flair menu', () => {
+  type SelectField = { name?: string; options?: { label: string; value: string }[]; defaultValue?: string[] };
+  const flairMenu = (saved: string, flairs: { id: string; text: string }[]): SelectField => {
+    const response = settingsFormResponse({ ...DEFAULT_SETTINGS, fundraiserFlairText: saved }, flairs);
+    const fields = (response.showForm?.form.fields ?? []) as SelectField[];
+    const field = fields.find((entry) => entry.name === 'fundraiserFlairText');
+    if (!field) throw new Error('flair menu missing');
+    return field;
+  };
+
+  it('shows the saved flair even when it differs in case or spacing from the flair', () => {
+    const menu = flairMenu('funraiser', [
+      { id: 'a', text: 'Funraiser ' },
+      { id: 'b', text: 'not a fundraiser' },
+    ]);
+    expect(menu.defaultValue).toEqual(['Funraiser ']);
+  });
+
+  it('keeps a saved flair that no longer exists visible instead of looking unset', () => {
+    const menu = flairMenu('Old Fundraiser', [{ id: 'a', text: 'Discussion' }]);
+    expect(menu.defaultValue).toEqual(['Old Fundraiser']);
+    expect(menu.options?.some((option) => option.value === 'Old Fundraiser')).toBe(true);
+  });
+
+  it('shows "Any post" when no flair is saved', () => {
+    expect(flairMenu('', [{ id: 'a', text: 'Funraiser' }]).defaultValue).toEqual([ANY_FLAIR]);
   });
 });
